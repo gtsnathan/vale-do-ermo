@@ -136,6 +136,15 @@ const tileXY = (page, x, y) => page.evaluate(([x, y]) => {
   await page.click('.sp[data-s="1"]');
   await page.waitForTimeout(400);
   await page.screenshot({ path: `${OUT}/d-manage.png` });
+  // v0.3: espera o primeiro bebê nascer da casa construída no jogo.
+  await page.click('.sp[data-s="10"]');
+  await wait(() => __ermo.sim.stats.births > 0, 'primeiro bebê nasceu', 400000);
+  await page.click('.sp[data-s="1"]');
+  await page.evaluate(() => { const S = __ermo.scene, k = S.sim.citizens.find(c => c.parents.length); S.selected = { type: 'citizen', id: k.id }; S.camMgr.centerTile(k.x, k.y); S.cameras.main.setZoom(2); });
+  await page.waitForFunction(() => { const k = __ermo.sim.citizens.find(c => c.parents.length); return !k.inside; }, null, { timeout: 200000 });
+  await page.evaluate(() => { const S = __ermo.scene, k = S.sim.citizens.find(c => c.parents.length); S.camMgr.centerTile(k.x, k.y); });
+  await page.waitForTimeout(600);
+  await page.screenshot({ path: `${OUT}/e-baby.png` });
   await page.click('#manage .px');
   // Clique no aldeão/edifício abre painel.
   await page.evaluate(() => { const b = __ermo.sim.buildings.find(b => b.type === 'house'); __ermo.scene.selected = { type: 'building', id: b.id }; });

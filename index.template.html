@@ -100,6 +100,15 @@ button, select, input { font: inherit; color: inherit; }
 .crop.on { background: #5a4629; border-color: var(--straw); color: var(--straw); }
 .note.warn { color: #ffb48c; }
 .bar.hunger i { background: var(--ember); }
+.bar.health i { background: var(--moss); }
+.pb > * { flex: none; }
+.spark { display: block; width: 100%; height: 46px; margin-top: 4px; background: #12100e; border: 1px solid var(--wood); }
+.spark polyline { fill: none; stroke: var(--straw); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.row.sm { font-size: 12px; }
+.log { list-style: none; margin: 2px 0 0; padding: 0; font-size: 13px; display: flex; flex-direction: column; gap: 3px; }
+.log li span { display: inline-block; min-width: 50px; color: var(--ash); font-variant-numeric: tabular-nums; }
+.log .death { color: #ffb48c; } .log .birth { color: #c6e09a; }
+#m-end { margin: 0 0 12px; padding: 8px 10px; background: #3a1d16; border-left: 5px solid var(--bad); }
 #toast { position: fixed; left: 50%; bottom: calc(112px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 8; padding: 6px 12px; width: max-content; max-width: calc(100vw - 32px); text-align: center; pointer-events: none; font-size: 14px; }
 
 .panel { position: fixed; z-index: 6; width: 262px; max-width: calc(100vw - 16px); max-height: min(62vh, 500px); display: flex; flex-direction: column; }
@@ -212,7 +221,8 @@ button, select, input { font: inherit; color: inherit; }
 <div id="menu" hidden>
   <div id="card">
     <h1>Vale do Ermo</h1>
-    <p>Dez aldeões, comida para poucos dias e um vale sem dono. Você decide o que erguer e o que plantar. Eles carregam cada tora nas costas.</p>
+    <p id="m-end" hidden></p>
+    <p>Dez aldeões, comida para poucos dias e um vale sem dono. Você decide o que erguer e o que plantar. Eles carregam cada tora, criam os filhos e enterram os velhos.</p>
     <div class="f">
       <label>Tamanho do mapa<select id="m-size"></select></label>
       <label>Dificuldade<select id="m-diff"></select></label>
@@ -225,7 +235,7 @@ button, select, input { font: inherit; color: inherit; }
       <button class="btn" id="m-go" hidden>Continuar vila salva</button>
       <button class="btn" id="m-back" hidden>Voltar ao jogo</button>
     </div>
-    <p class="keys">Roda: zoom · Arrastar: mover · R: girar · Espaço: pausar · 1, 2, 3: velocidade · Esc: cancelar</p>
+    <p class="keys">Roda: zoom · Arrastar: mover · R: girar · Espaço: pausar · 1 a 4: velocidade · Esc: cancelar</p>
   </div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.80.1/phaser.min.js"></script>

@@ -13,6 +13,7 @@ export class JobManager {
       return this._cargo(c, comp);
     }
     if (S.isNight()) return this._rest(c);
+    if (S.population.isChild(c)) return this._eat(c, comp) || this._idle(c);
     return this._eat(c, comp) || this._fetch(c, comp)
       || (c.profession === 'builder' && this._build(c, comp))
       || (c.profession === 'farmer' && this._farmNext(c, comp))
@@ -232,6 +233,7 @@ export class JobManager {
   describe(c) {
     const t = c.task;
     if (c.inside) return 'Descansando em casa';
+    if (this.sim.population.isChild(c) && c.task?.kind === 'idle') return 'Brincando perto de casa';
     if (!t) return 'Decidindo o que fazer';
     const S = this.sim;
     const low = r => (RES_LABEL[r] || 'carga').toLowerCase();

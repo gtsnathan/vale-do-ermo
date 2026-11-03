@@ -7,6 +7,7 @@ const KEY = 'vale-do-ermo.save.v1';
 const store = {
   get() { try { return localStorage.getItem(KEY); } catch { return null; } },
   set(v) { try { localStorage.setItem(KEY, v); return true; } catch { return false; } },
+  del() { try { localStorage.removeItem(KEY); } catch { /* sem armazenamento */ } },
 };
 
 const game = new Phaser.Game({
@@ -46,6 +47,11 @@ const actions = {
   save() { return inGame && store.set(SaveManager.serialize(scene.sim)); },
   hasSave() { return inGame || !!store.get(); },
   inGame() { return inGame; },
+  ended(sim) {
+    inGame = false; store.del(); scene.speed = 0;
+    ui.endText = `A vila se extinguiu no ano ${sim.year()}. Nasceram ${sim.stats.births} crianças ao longo da história.`;
+    ui.showMenu();
+  },
 };
 const ui = new UIManager(game, actions);
 

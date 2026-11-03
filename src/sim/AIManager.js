@@ -66,8 +66,8 @@ export class AIManager {
     const tx = nx + 0.5, ty = ny + 0.5;
     const cur = W.idx(c.x | 0, c.y | 0);
     const dx = tx - c.x, dy = ty - c.y, d = Math.hypot(dx, dy);
-    // Quem passa fome anda mais devagar. Doenças e mortes por fome entram na versão 0.3.
-    const step = (WALK * STEP) / W.costI(cur) * (c.hunger >= 95 ? 0.7 : 1);
+    // Quem passa fome anda mais devagar. Doenças entram na versão 0.4.
+    const step = (WALK * STEP) / W.costI(cur) * (c.hunger >= 95 ? 0.7 : 1) * (c.health < 30 ? 0.8 : 1) * (c.age >= 60 ? 0.85 : 1) * (S.population.isChild(c) ? 0.75 : 1);
     this._face(c, dx, dy);
     c.anim = 'walk';
     if (d <= step) { c.x = tx; c.y = ty; c.pathI++; }
@@ -277,7 +277,8 @@ export class AIManager {
     if (!t.moved) {
       t.moved = true;
       const W = S.world;
-      const a = S.storage.depots()[0] || { door: { x: c.x | 0, y: c.y | 0 } };
+      const hm = S.population.isChild(c) && c.home != null ? S.building(c.home) : null;
+      const a = hm || S.storage.depots()[0] || { door: { x: c.x | 0, y: c.y | 0 } };
       for (let i = 0; i < 8; i++) {
         const x = a.door.x + S.rng.int(-5, 5), y = a.door.y + S.rng.int(-5, 5);
         if (W.compAt(x, y) === W.compAt(c.x | 0, c.y | 0) && W.compAt(x, y) >= 0 && !W.doorAt[W.idx(x, y)]) { t.goal = [x, y]; break; }

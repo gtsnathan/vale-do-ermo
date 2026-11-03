@@ -1,5 +1,5 @@
 import { RNG, hashSeed } from './rng.js';
-import { BUILDINGS, DAY, DIFFICULTY, FOODS, HUNGRY, MAP_SIZES, NIGHT_END, NIGHT_START, NODE, PROFESSIONS, RES, STEP } from './defs.js';
+import { ADULT_AGE, BUILDINGS, DAY, DIFFICULTY, YEAR, YEAR_DAYS, FOODS, HUNGRY, MAP_SIZES, NIGHT_END, NIGHT_START, NODE, PROFESSIONS, RES, STEP } from './defs.js';
 import { generateTerrain } from './TerrainGenerator.js';
 import { WorldManager } from './WorldManager.js';
 import { PathfindingSystem } from './PathfindingSystem.js';
@@ -26,7 +26,8 @@ export class Simulation {
     this.alerts = [];
     this.buildings = []; this.citizens = []; this.piles = []; this.farms = [];
     this.nodes = new Map(); this.markedNodes = new Set();
-    this.stats = { produced: Object.fromEntries(RES.map(r => [r, 0])), consumed: Object.fromEntries(RES.map(r => [r, 0])), placed: {}, built: {}, everMarked: 0 };
+    this.stats = { produced: Object.fromEntries(RES.map(r => [r, 0])), consumed: Object.fromEntries(RES.map(r => [r, 0])), placed: {}, built: {}, everMarked: 0, births: 0, deaths: {} };
+    this.chronicle = []; this.history = [];
     this.pathfinding = new PathfindingSystem(this.world);
     this.storage = new StorageManager(this);
     this.resources = new ResourceManager(this);
@@ -68,6 +69,8 @@ export class Simulation {
   citizen(id) { return this.citizens.find(c => c.id === id); }
   dayFrac() { return (this.time / DAY) % 1; }
   day() { return Math.floor(this.time / DAY) + 1; }
+  year() { return Math.floor(this.time / YEAR) + 1; }
+  dayOfYear() { return (this.day() - 1) % YEAR_DAYS + 1; }
   isNight() { const f = this.dayFrac(); return f >= NIGHT_START || f < NIGHT_END; }
 
   mark(x0, y0, x1, y1, types, value) {
@@ -100,7 +103,13 @@ export class Simulation {
     this.pathBudget = 8;
     if (this.world.compDirty) this.world.recomputeComps();
     for (const c of this.citizens) this.ai.update(c);
-    if (this.steps % 20 === 0) { this.farming.tick(); this._alerts(); }
+    if (this.steps % 20 === 0) {
+      this.farming.tick();
+      this.population.tick();
+      const d = this.day();
+      if (d !== this.lastDay) { this.lastDay = d; this.population.daily(); }
+      this._alerts();
+    }
   }
   foodTotal() {
     let n = 0;
@@ -136,8 +145,13 @@ export class Simulation {
     if (spare) out.push({ id: 'spare', level: 'info', text: `${spare} profissionais sem local de trabalho estão ajudando em outros serviços.` });
     const hl = this.population.homeless();
     if (hl > 0 && this.isNight()) out.push({ id: 'homeless', level: 'warn', text: `${hl} aldeões dormem ao relento. Construa casas.` });
-    const idle = this.citizens.filter(c => c.task && c.task.kind === 'idle').length;
-    if (idle >= this.citizens.length && !this.isNight()) out.push({ id: 'idle', level: 'info', text: 'Todos estão sem tarefa. Marque recursos ou ordene uma construção.' });
+    const grown = this.citizens.filter(c => c.age >= ADULT_AGE);
+    const wait = this.population.waitingHome();
+    if (wait > 0 && !this.isNight()) out.push({ id: 'wait-home', level: 'info', text: `${wait} adultos esperam casa própria. Sem casa, a família não cresce.` });
+    const weak = this.citizens.filter(c => c.health < 30).length;
+    if (weak) out.push({ id: 'weak', level: 'bad', text: `${weak} aldeões estão muito fracos e podem morrer.` });
+    const idle = grown.filter(c => c.task && c.task.kind === 'idle').length;
+    if (grown.length && idle >= grown.length && !this.isNight()) out.push({ id: 'idle', level: 'info', text: 'Todos estão sem tarefa. Marque recursos ou ordene uma construção.' });
     this.alerts = out;
   }
 }

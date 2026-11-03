@@ -293,6 +293,7 @@ export class GameScene extends Phaser.Scene {
   _consumeEvents() {
     const ev = this.sim.events;
     for (const e of ev) {
+      if (e.t === 'news') { this.game.events.emit('news', e); continue; }
       if (e.t === 'crop') { const f = this.sim.farming.get(e.farmId); if (f) this._syncTile(f, e.i); }
       else if (e.t === 'farmRemoved') { for (const t of e.tiles) this._clearTile(t); }
       else if (e.t === 'mark') {
@@ -333,13 +334,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   _syncCitizens(alpha, time) {
+    const alive = new Set();
     for (const c of this.sim.citizens) {
+      alive.add(c.id);
       let v = this.citizenViews.get(c.id);
       if (!v) {
         v = { body: Object.assign(this.add.image(0, 0, 'atlas', 'c0_f_i'), { isWorld: true }), cargo: Object.assign(this.add.image(0, 0, 'atlas', 'carry_wood'), { isWorld: true }), jx: (hash(c.id, 1, 5) - 0.5) * 12, jy: (hash(c.id, 2, 5) - 0.5) * 6 };
         this.citizenViews.set(c.id, v);
       }
       v.body.setVisible(!c.inside);
+      v.body.setScale(c.age < 12 ? 0.55 + (c.age / 12) * 0.4 : 1);
       if (c.inside) { v.cargo.setVisible(false); continue; }
       const x = c.px + (c.x - c.px) * alpha, y = c.py + (c.y - c.py) * alpha;
       const [sx, sy] = iso(x, y);
@@ -360,6 +364,7 @@ export class GameScene extends Phaser.Scene {
         v.cargo.setVisible(true).setPosition(Math.round(px), Math.round(py) - 21);
       } else v.cargo.setVisible(false);
     }
+    for (const [id, v] of this.citizenViews) if (!alive.has(id)) { v.body.destroy(); v.cargo.destroy(); this.citizenViews.delete(id); }
   }
 
   _stage(b) {
@@ -680,7 +685,7 @@ export class GameScene extends Phaser.Scene {
     if (k === 'r') this.rotate();
     else if (k === 'escape') { this.setTool({ kind: 'select' }); this.selected = null; }
     else if (k === ' ') { e.preventDefault?.(); this.game.events.emit('toggle-pause'); }
-    else if (k === '1' || k === '2' || k === '3') this.game.events.emit('speed', [1, 2, 5][+k - 1]);
+    else if (['1', '2', '3', '4'].includes(k)) this.game.events.emit('speed', [1, 2, 5, 10][+k - 1]);
   }
   _pick(sx, sy) {
     const S = this.sim;

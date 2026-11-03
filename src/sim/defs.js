@@ -33,6 +33,16 @@ export const FARM_MIN = 3, FARM_MAX = 8;
 export const FORAGE_RADIUS = 14;
 export const PROFESSIONS = { laborer: 'Trabalhador geral', builder: 'Construtor', farmer: 'Agricultor', gatherer: 'Coletor' };
 
+export const YEAR_DAYS = 6;                 // um ano tem 6 dias de jogo
+export const YEAR = DAY * YEAR_DAYS;
+export const ADULT_AGE = 12;                // criança não trabalha; a partir daqui, sim
+export const MARRY_AGE = 16;
+export const FERTILE_MAX = 45;
+export const PREGNANCY = DAY * 3;
+export const BIRTH_REST = DAY * 3;
+export const OLD_AGE = 55;                  // a partir daqui o risco de morrer de velhice cresce
+export const CHILD_NAMES = true;
+
 export const NODE = {
   tree:  { label: 'Árvore', res: 'wood',  yield: 3, work: 6,  blocks: false },
   stone: { label: 'Afloramento de pedra', res: 'stone', yield: 5, work: 11, blocks: true },

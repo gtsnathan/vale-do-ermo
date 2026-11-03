@@ -10,14 +10,14 @@ export const SaveManager = {
     const changed = [];
     for (const n of sim.nodes.values()) if (n.marked || n.work > 0) changed.push({ id: n.id, marked: n.marked, work: n.work, reservedBy: n.reservedBy });
     return JSON.stringify({
-      v: 2, config: sim.config, time: sim.time, steps: sim.steps, nextId: sim.nextId, rng: sim.rng.s,
+      v: 3, chronicle: sim.chronicle, history: sim.history, lastDay: sim.lastDay, config: sim.config, time: sim.time, steps: sim.steps, nextId: sim.nextId, rng: sim.rng.s,
       startStock: sim.startStock, stats: sim.stats, removed, changed,
       buildings: sim.buildings, piles: sim.piles, citizens: sim.citizens, farms: sim.farms,
     });
   },
   load(text) {
     const d = JSON.parse(text);
-    if (d.v !== 1 && d.v !== 2) throw new Error('Versão de salvamento desconhecida');
+    if (![1, 2, 3].includes(d.v)) throw new Error('Versão de salvamento desconhecida');
     const sim = new Simulation(d.config);
     const W = sim.world;
     for (const b of sim.buildings) {
@@ -28,6 +28,8 @@ export const SaveManager = {
     Object.assign(sim, { time: d.time, steps: d.steps, nextId: d.nextId, startStock: d.startStock, stats: d.stats });
     sim.rng.s = d.rng;
     if (d.v === 1) this._fromV1(sim);
+    if (d.v < 3) this._toV3(sim);
+    sim.chronicle = d.chronicle || []; sim.history = d.history || []; sim.lastDay = d.lastDay ?? sim.day();
     for (const id of d.removed) { const n = sim.nodes.get(id); if (n) sim.removeNode(n); }
     for (const c of d.changed) {
       const n = sim.nodes.get(c.id);
@@ -43,6 +45,15 @@ export const SaveManager = {
     sim.events = [];
     W.recomputeComps();
     return sim;
+  },
+  // Vilas anteriores à 0.3 ganham os dados de família e saúde.
+  _toV3(sim) {
+    sim.stats.births = sim.stats.births || 0;
+    sim.stats.deaths = sim.stats.deaths || {};
+    for (const c of sim.citizens) {
+      c.diet = c.diet || []; c.parents = c.parents || [];
+      c.pregnant = c.pregnant || 0; c.birthRest = c.birthRest || 0;
+    }
   },
   // Vilas da versão 0.1 ganham os campos novos e o celeiro inicial.
   _fromV1(sim) {

@@ -21,6 +21,7 @@ export class UIManager {
       this.toast(n ? `${n} ${what} marcadas para coleta.` : `Nenhuma ${what === 'árvores' ? 'árvore' : 'rocha'} nesta área.`);
     });
     game.events.on('farmPlaced', r => this.toast(r.ok ? 'Fazenda criada. Escolha o cultivo e defina agricultores em Gestão.' : r.reason));
+    game.events.on('news', e => { if (e.kind !== 'family') this.toast(e.text); });
     game.events.on('toggle-pause', () => this.setSpeed(this.scene.speed === 0 ? (this.prevSpeed || 1) : 0));
     game.events.on('speed', s => this.setSpeed(s));
     this.tickT = 0;
@@ -32,8 +33,8 @@ export class UIManager {
       `<div class="stat" title="Espaço usado nos depósitos"><span class="lbl">Depósitos</span><b id="r-cap">0/0</b></div>
       <div class="stat" title="Comida guardada, somando celeiros e casas">${icon('food')}<b id="r-food">0</b></div>`;
     $('#vil').innerHTML = `<div class="stat" title="População">${icon('pop')}<b id="v-pop">10</b></div>
-      <div class="stat" title="Famílias com casa">${icon('roof')}<b id="v-home">0/5</b></div>`;
-    $('#speed').innerHTML = [[0, 'Pausar', '❚❚'], [1, 'Velocidade normal', '1×'], [2, 'Velocidade dupla', '2×'], [5, 'Velocidade máxima', '5×']]
+      <div class="stat" title="Pessoas com casa">${icon('roof')}<b id="v-home">0/5</b></div>`;
+    $('#speed').innerHTML = [[0, 'Pausar', '❚❚'], [1, 'Velocidade normal', '1×'], [2, 'Velocidade dupla', '2×'], [5, 'Velocidade rápida', '5×'], [10, 'Velocidade máxima', '10×']]
       .map(([v, t, l]) => `<button class="sp" data-s="${v}" title="${t}" aria-label="${t}">${l}</button>`).join('');
     $('#speed').addEventListener('click', e => { const b = e.target.closest('button'); if (b) this.setSpeed(+b.dataset.s); });
   }
@@ -119,9 +120,10 @@ export class UIManager {
     $('#menu').hidden = false;
     $('#hud').classList.add('dim');
     $('#m-go').hidden = !this.actions.hasSave();
+    $('#m-end').hidden = !this.endText; $('#m-end').textContent = this.endText || '';
     $('#m-back').hidden = !this.actions.inGame();
   }
-  hideMenu() { $('#menu').hidden = true; $('#hud').classList.remove('dim'); }
+  hideMenu() { this.endText = null; $('#menu').hidden = true; $('#hud').classList.remove('dim'); }
   _panels() {
     document.querySelectorAll('.panel').forEach(p => {
       const head = $('.ph', p);
@@ -226,10 +228,10 @@ export class UIManager {
     $('#r-food').textContent = sim.foodTotal();
     $('#r-cap').textContent = `${sim.storage.usedTotal()}/${sim.storage.capacity()}`;
     $('#v-pop').textContent = sim.citizens.length;
-    const fams = new Set(sim.citizens.map(c => c.family)), housed = new Set(sim.citizens.filter(c => c.home != null).map(c => c.family));
-    $('#v-home').textContent = `${housed.size}/${fams.size}`;
+    $('#v-home').textContent = `${sim.citizens.filter(c => c.home != null).length}/${sim.citizens.length}`;
+    if (!sim.citizens.length && this.actions.inGame()) { this.actions.ended(sim); return; }
     const f = sim.dayFrac(), h = Math.floor(f * 24), m = Math.floor((f * 24 - h) * 6) * 10;
-    $('#clock').innerHTML = `<b>Dia ${sim.day()}</b><span>${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}${sim.isNight() ? ' · noite' : ''}</span>`;
+    $('#clock').innerHTML = `<b>Ano ${sim.year()} · Dia ${sim.dayOfYear()}</b><span>${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}${sim.isNight() ? ' · noite' : ''}</span>`;
     void DAY;
     this._alerts(sim);
     this._goals(sim);
@@ -246,9 +248,9 @@ export class UIManager {
     const G = [
       ['Marque árvores com a ferramenta Cortar', sim.stats.everMarked > 0],
       ['Ordene uma casa perto do depósito', (sim.stats.placed.house || 0) > 0],
-      ['Espere o material chegar e a casa subir', (sim.stats.built.house || 0) > 0],
       ['Crie uma fazenda e defina um agricultor em Gestão', sim.farms.length > 0 && sim.population.count('farmer') > 0],
       ['Dê uma casa a cada uma das 5 famílias', housed >= 5],
+      ['Veja nascer a primeira criança da vila', sim.stats.births > 0],
     ];
     const done = G.every(g => g[1]);
     const html = done ? '' : `<div class="gt">Primeiros dias</div>${G.map(([l, ok]) => `<div class="g ${ok ? 'ok' : ''}"><i></i>${l}</div>`).join('')}`;
@@ -268,10 +270,14 @@ export class UIManager {
       const c = sim.citizen(s.id); if (!c) { S.selected = null; return; }
       title = c.name;
       const home = c.home != null ? sim.building(c.home) : null;
-      body = row('Agora', esc(sim.jobs.describe(c))) + row('Profissão', PROFESSIONS[c.profession]) + row('Idade', `${c.age} anos`) + row('Sexo', c.sex === 'M' ? 'Masculino' : 'Feminino') +
-        row('Família', esc(c.family)) + row('Cônjuge', person(c.spouse)) + row('Casa', home ? (home.done ? 'Casa da família' : 'Em obra') : 'Sem casa') +
+      body = row('Agora', esc(sim.jobs.describe(c))) + row('Profissão', PROFESSIONS[c.profession] || 'Criança') + row('Idade', `${Math.floor(c.age)} anos`) + row('Sexo', c.sex === 'M' ? 'Masculino' : 'Feminino') +
+        row('Família', esc(c.family)) + row('Cônjuge', person(c.spouse)) +
+        (c.parents.some(id => sim.citizen(id)) ? row('Pais', c.parents.filter(id => sim.citizen(id)).map(person).join(', ')) : '') +
+        (sim.population.children(c).length ? row('Filhos', sim.population.children(c).map(k => person(k.id)).join(', ')) : '') +
+        (c.pregnant > 0 ? row('Gravidez', `nasce em ${Math.max(1, Math.ceil(c.pregnant / DAY))} dias`) : '') + row('Casa', home ? (home.done ? 'Casa da família' : 'Em obra') : 'Sem casa') +
         row('Carregando', c.inv.res ? `${c.inv.amount} ${RES_LABEL[c.inv.res].toLowerCase()}` : 'Nada') +
         (c.lastMeal ? row('Última refeição', RES_LABEL[c.lastMeal]) : '') +
+        `<div class="bar health"><label>Saúde <em>${Math.round(c.health)}%</em></label><div><i style="width:${c.health}%"></i></div></div>` +
         `<div class="bar hunger"><label>Fome <em>${Math.round(c.hunger)}%</em></label><div><i style="width:${c.hunger}%"></i></div></div>`;
     } else if (s.type === 'building') {
       const b = sim.building(s.id); if (!b) { S.selected = null; return; }
@@ -347,16 +353,29 @@ export class UIManager {
     };
     const capM = `${sim.storage.usedTotal()}/${sim.storage.capacity()}`, capF = `${sim.storage.usedTotal('food')}/${sim.storage.capacity('food')}`;
     const days = sim.foodDays();
-    const html = `<h3>Profissões</h3>${rows}
+    const kids = sim.citizens.filter(c => P.isChild(c)).length, elders = sim.citizens.filter(c => c.age >= 55).length;
+    const dead = Object.values(sim.stats.deaths).reduce((a, b) => a + b, 0);
+    const H = sim.history, maxN = Math.max(10, ...H.map(h => h.n));
+    const pts = H.map((h, i) => `${H.length > 1 ? (i / (H.length - 1)) * 280 : 0},${44 - (h.n / maxN) * 40}`).join(' ');
+    const chart = H.length > 1 ? `<svg class="spark" viewBox="0 0 280 46" role="img" aria-label="População ao longo do tempo"><polyline points="${pts}"/></svg><div class="row sm"><span>Dia ${H[0].d}</span><span>máx. ${maxN}</span><span>Dia ${H[H.length - 1].d}</span></div>` : '';
+    const log = sim.chronicle.slice(-10).reverse().map(e => `<li class="${e.kind}"><span>A${e.year} D${e.day}</span>${esc(e.text)}</li>`).join('') || '<li>Nada a registrar ainda.</li>';
+    const html = `<h3>População</h3>
+      <div class="row"><span>Crianças</span><b>${kids}</b></div>
+      <div class="row"><span>Adultos</span><b>${sim.citizens.length - kids - elders}</b></div>
+      <div class="row"><span>Idosos (55+)</span><b>${elders}</b></div>
+      <div class="row"><span>Nascimentos / mortes</span><b>${sim.stats.births} / ${dead}</b></div>
+      ${chart}
+      <h3>Profissões</h3>${rows}
       <h3>Estoques</h3>
       <div class="row"><span>Depósitos</span><b>${capM}</b></div>
       <div class="row"><span>Celeiros</span><b>${capF}</b></div>
       <div class="row"><span>Comida dura cerca de</span><b>${days >= 99 ? '99+' : Math.floor(days)} dias</b></div>
-      <div class="tw"><table><thead><tr><th>Recurso</th><th>Guardado</th><th>Casas</th><th>Chão</th></tr></thead><tbody>${RES.map(stockRow).join('')}</tbody></table></div>`;
+      <div class="tw"><table><thead><tr><th>Recurso</th><th>Guardado</th><th>Casas</th><th>Chão</th></tr></thead><tbody>${RES.map(stockRow).join('')}</tbody></table></div>
+      <h3>Crônica</h3><ul class="log">${log}</ul>`;
     this._set('manageBody', html, $('#manage .pb'));
   }
   _people(sim) {
-    const html = sim.citizens.map(c => `<button class="person" data-c="${c.id}"><img src="${this.look(c)}" alt=""><span><b>${esc(c.name)}</b><em>${PROFESSIONS[c.profession]} · ${esc(sim.jobs.describe(c))}</em></span></button>`).join('');
+    const html = sim.citizens.map(c => `<button class="person" data-c="${c.id}"><img src="${this.look(c)}" alt=""><span><b>${esc(c.name)}</b><em>${Math.floor(c.age)} anos · ${PROFESSIONS[c.profession] || 'Criança'} · ${esc(sim.jobs.describe(c))}</em></span></button>`).join('');
     this._set('peopleBody', html, $('#people .pb'));
   }
   look(c) {

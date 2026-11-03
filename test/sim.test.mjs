@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Simulation } from '../src/sim/Simulation.js';
 import { SaveManager } from '../src/sim/SaveManager.js';
-import { BUILDINGS, RES, STEP, T } from '../src/sim/defs.js';
+import { ADULT_AGE, BUILDINGS, DAY, PREGNANCY, RES, STEP, T, YEAR } from '../src/sim/defs.js';
 
 function invariants(s) {
   const W = s.world;
@@ -457,4 +457,184 @@ test('vila salva na versão 0.1 abre, ganha celeiro e continua válida', () => {
   assert.equal(l.population.count('builder'), 2);
   invariants(l);
   run(l, 300);
+});
+
+const housed = (s, n = 5) => {
+  for (let k = 0; k < n; k++) {
+    const [x, y] = freeSpot(s, 'house');
+    const b = s.construction.place('house', x, y, 0).building;
+    for (const r of RES) b.delivered[r] = BUILDINGS.house.cost[r] || 0;
+    for (const r in BUILDINGS.house.cost) { const d = s.storage.depots()[0]; d.stock[r] = Math.max(0, d.stock[r]); s.startStock[r] += BUILDINGS.house.cost[r]; }
+    s.construction.finish(b);
+  }
+};
+const fed = s => { for (const c of s.citizens) c.hunger = 0; };
+const stockUp = s => { const b = s.storage.barns()[0]; const add = 190 - s.storage.used(b); b.stock.potato += add; s.startStock.potato += add; };
+
+test('casal com casa tem filhos; casal sem casa não tem', () => {
+  const a = new Simulation({ seed: 'bebe', difficulty: 'facil' });
+  run(a, DAY * 8);
+  assert.equal(a.stats.births, 0, 'nasceu sem casa');
+  assert.equal(a.citizens.length, 10);
+  const b = new Simulation({ seed: 'bebe', difficulty: 'facil' });
+  housed(b);
+  for (let i = 0; i < 30 && !b.stats.births; i++) run(b, DAY, 200);
+  assert.ok(b.stats.births > 0, 'não nasceu ninguém');
+  assert.equal(b.citizens.length, 10 + b.stats.births);
+  const k = b.citizens.find(c => c.parents.length);
+  assert.equal(k.parents.length, 2);
+  assert.equal(b.citizen(k.parents[0]).home, k.home);
+  assert.equal(k.profession, 'child');
+  assert.ok(b.chronicle.some(e => e.kind === 'birth'));
+});
+
+test('casa cheia impede novos filhos', () => {
+  const s = new Simulation({ seed: 'cheia', difficulty: 'facil' });
+  housed(s, 1);
+  const h = s.buildings.find(b => b.type === 'house');
+  const w = h.residents.map(id => s.citizen(id)).find(c => c.sex === 'F');
+  for (let i = 0; i < 3; i++) { const fake = w.id * 1000 + i; h.residents.push(fake); s.citizens.push({ ...s.citizens[0], id: fake, name: `x${i}`, spouse: null, parents: [], home: h.id, sex: 'M', age: 30, inv: { res: null, amount: 0 }, task: null, path: null, diet: [], profession: 'laborer', workplace: null }); }
+  for (let i = 0; i < 12; i++) { s.population.daily(); }
+  assert.equal(w.pregnant, 0);
+});
+
+test('crianças não trabalham, crescem e entram na força de trabalho', () => {
+  const s = new Simulation({ seed: 'cresce', difficulty: 'facil' });
+  housed(s, 1);
+  const w = s.citizens.find(c => c.home != null && c.sex === 'F');
+  w.pregnant = 1;
+  s.step();
+  run(s, 2);
+  const k = s.citizens.find(c => c.parents.includes(w.id));
+  assert.ok(k, 'bebê não nasceu');
+  for (const t of nearestNodes(s, 'tree', 20)) s.mark(t.x, t.y, t.x, t.y, ['tree'], true);
+  for (let i = 0; i < 2000; i++) {
+    s.step();
+    assert.ok(!k.inv.res, 'criança carregando');
+    assert.ok(!['harvest', 'haul', 'deliver', 'build', 'cargo'].includes(k.task?.kind), `criança trabalhando: ${k.task?.kind}`);
+  }
+  assert.ok(k.age > 0);
+  assert.equal(s.population.count('laborer') + s.population.count('builder'), 10);
+  assert.equal(s.population.changeCount('farmer', 20), 8);
+  assert.equal(k.profession, 'child');
+  k.age = ADULT_AGE - 0.0001;
+  run(s, 2);
+  assert.equal(k.profession, 'laborer');
+});
+
+test('sem comida o aldeão enfraquece e morre de fome, sem perder a carga', () => {
+  const s = new Simulation({ seed: 'fome' });
+  const barn = s.storage.barns()[0];
+  for (const r of RES) { s.startStock[r] -= barn.stock[r]; barn.stock[r] = 0; }
+  for (const t of nearestNodes(s, 'tree', 40)) s.mark(t.x, t.y, t.x, t.y, ['tree'], true);
+  let weak = false;
+  for (let i = 0; i < 40 && s.citizens.length; i++) { run(s, DAY / 2, 100); if (s.alerts.some(a => a.id === 'weak')) weak = true; }
+  assert.ok(weak, 'não avisou fraqueza');
+  assert.equal(s.citizens.length, 0, 'deveriam ter morrido');
+  assert.equal(s.stats.deaths.hunger, 10);
+  assert.ok(s.chronicle.some(e => e.kind === 'death'));
+  for (let i = 0; i < 100; i++) s.step();
+  invariants(s);
+});
+
+test('com comida a saúde se recupera', () => {
+  const s = new Simulation({ seed: 'cura', difficulty: 'facil' });
+  housed(s);
+  const c = s.citizens[0];
+  c.health = 40;
+  run(s, DAY * 2, 200);
+  assert.ok(c.health > 55, `saúde ${c.health}`);
+});
+
+test('velhos morrem de velhice e o viúvo pode casar de novo', () => {
+  const s = new Simulation({ seed: 'velho', difficulty: 'facil' });
+  housed(s);
+  const old = s.citizens.find(c => c.sex === 'M'), sp = s.citizen(old.spouse);
+  old.age = 90;
+  let n = 0;
+  while (s.citizen(old.id) && n++ < 300) { stockUp(s); fed(s); run(s, 10, 100); }
+  assert.ok(!s.citizen(old.id), 'não morreu');
+  assert.equal(s.stats.deaths.age, 1);
+  assert.equal(sp.spouse, null);
+  const h = s.building(sp.home);
+  assert.ok(!h.residents.includes(old.id));
+  assert.ok(s.citizens.every(c => c.age < 60));
+});
+
+test('jovens casam, não com parentes, e saem de casa quando há moradia', () => {
+  const s = new Simulation({ seed: 'casar', difficulty: 'facil' });
+  housed(s);
+  const [h1, h2] = s.buildings.filter(b => b.type === 'house');
+  const mk = (name, sex, home, parents) => {
+    const base = s.citizen(h1.residents[0]);
+    const c = { ...base, id: s.newId(), name, sex, age: 20, spouse: null, parents, home: home.id, inv: { res: null, amount: 0 }, task: null, path: null, diet: [], x: home.door.x + 0.5, y: home.door.y + 0.5, px: 0, py: 0, inside: false, profession: 'laborer', workplace: null, pregnant: 0, birthRest: 0 };
+    s.citizens.push(c); home.residents.push(c.id);
+    return c;
+  };
+  const brother = mk('Irmão', 'M', h1, [h1.residents[0], h1.residents[1]]);
+  const sister = mk('Irmã', 'F', h1, [h1.residents[0], h1.residents[1]]);
+  s.population.daily();
+  assert.equal(brother.spouse, null, 'irmãos casaram');
+  assert.equal(sister.spouse, null);
+  const other = mk('Vizinha', 'F', h2, [h2.residents[0], h2.residents[1]]);
+  s.population.daily();
+  assert.equal(brother.spouse, other.id);
+  assert.equal(brother.home, h1.id, 'não havia casa livre');
+  assert.ok(s.population.waitingHome() >= 1);
+  const [x, y] = freeSpot(s, 'house');
+  const b3 = s.construction.place('house', x, y, 0).building;
+  for (const r of RES) b3.delivered[r] = BUILDINGS.house.cost[r] || 0;
+  s.startStock.wood += 16; s.startStock.stone += 4;
+  s.construction.finish(b3);
+  assert.equal(brother.home, b3.id);
+  assert.equal(other.home, b3.id);
+  assert.ok(!h1.residents.includes(brother.id));
+});
+
+test('órfãos são acolhidos por outra família', () => {
+  const s = new Simulation({ seed: 'orfao', difficulty: 'facil' });
+  housed(s, 2);
+  const [h1, h2] = s.buildings.filter(b => b.type === 'house');
+  const parents = h1.residents.map(id => s.citizen(id));
+  const kid = { ...parents[0], id: s.newId(), name: 'Órfão', age: 5, spouse: null, parents: parents.map(p => p.id), home: h1.id, inv: { res: null, amount: 0 }, task: null, path: null, diet: [], profession: 'child', workplace: null, pregnant: 0, birthRest: 0 };
+  s.citizens.push(kid); h1.residents.push(kid.id);
+  for (const p of parents) s.population.kill(p, 'age');
+  assert.equal(kid.home, h2.id);
+  assert.ok(h2.residents.includes(kid.id));
+});
+
+test('dez anos de vila: a população cresce só por nascimentos e nenhuma regra quebra', () => {
+  const s = new Simulation({ seed: 'decada', size: 'grande', difficulty: 'facil' });
+  housed(s);
+  const [x, y] = clearArea(s, 8, 8);
+  s.farming.place(x, y, x + 7, y + 7, 'corn');
+  s.population.changeCount('farmer', 2);
+  for (const t of nearestNodes(s, 'tree', 80)) s.mark(t.x, t.y, t.x, t.y, ['tree'], true);
+  const t0 = Date.now();
+  run(s, YEAR * 10, 400);
+  assert.ok(s.stats.births >= 5, `nascimentos: ${s.stats.births}`);
+  const dead = Object.values(s.stats.deaths).reduce((a, b) => a + b, 0);
+  assert.equal(s.citizens.length, 10 + s.stats.births - dead);
+  for (const h of s.buildings) if (h.type === 'house') assert.ok(h.residents.length <= BUILDINGS.house.residents);
+  assert.ok(s.history.length > 30);
+  console.log(`  10 anos: ${s.citizens.length} habitantes, ${s.stats.births} nascimentos, ${dead} mortes, ${Date.now() - t0} ms`);
+});
+
+test('gravidez, família e crônica sobrevivem ao salvamento; save v2 abre', () => {
+  const s = new Simulation({ seed: 'savefam', difficulty: 'facil' });
+  housed(s);
+  const w = s.citizens.find(c => c.sex === 'F');
+  w.pregnant = PREGNANCY;
+  run(s, DAY * 1.2);
+  const l = SaveManager.load(SaveManager.serialize(s));
+  invariants(l);
+  assert.ok(l.citizen(w.id).pregnant > 0);
+  assert.deepEqual(l.history, s.history);
+  const j = JSON.parse(SaveManager.serialize(s));
+  j.v = 2; delete j.chronicle; delete j.history; delete j.stats.births; delete j.stats.deaths;
+  for (const c of j.citizens) { delete c.diet; delete c.parents; delete c.pregnant; delete c.birthRest; }
+  const o = SaveManager.load(JSON.stringify(j));
+  invariants(o);
+  run(o, DAY * 3, 200);
+  assert.equal(o.stats.births >= 0, true);
 });
