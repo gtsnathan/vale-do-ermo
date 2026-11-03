@@ -1,7 +1,7 @@
 import { buildAll } from '../art/sprites.js';
 import { bakeCell, CELL_H, CELL_W } from '../art/terrainBake.js';
 import { hash } from '../art/pix.js';
-import { BUILDINGS, DAY, RES, STEP, T } from '../sim/defs.js';
+import { BUILDINGS, CROPS, DAY, RES, STEP, T, isFood } from '../sim/defs.js';
 import { CameraManager } from './CameraManager.js';
 
 const Phaser = globalThis.Phaser;
@@ -82,7 +82,10 @@ export class GameScene extends Phaser.Scene {
     this.selected = null;
     this.tool = { kind: 'select' };
     this.ghostMark = null;
+    this.tileViews = new Map();
+    sim.events.length = 0;
     for (const n of sim.nodes.values()) this._addNodeObj(n);
+    for (const f of sim.farms) for (let i = 0; i < f.tiles.length; i++) this._syncTile(f, i);
     for (let y = 0; y < W.h; y++) for (let x = 0; x < W.w; x++) {
       const i = W.idx(x, y);
       if (W.terrain[i] === T.MOUNTAIN) this._addMountain(x, y);
@@ -130,6 +133,33 @@ export class GameScene extends Phaser.Scene {
     // Só o interior sobe um pouco: a borda continua apoiada no chão.
     const lift = d > 0 ? Math.floor(hash(x, y, 33) * 11) : 0;
     this._toBucket({ kind: 'mt', frame: `mt${d}_${Math.floor(hash(x, y, 31) * 4)}`, sx, sy: sy - lift, depth: (x + y + 1) * DEPTH - 1, mountain: true });
+  }
+  // Cada tile de fazenda tem o solo arado e, quando plantado, a muda.
+  _syncTile(f, i) {
+    const t = f.tiles[i], W = this.sim.world, key = W.idx(t.x, t.y);
+    let v = this.tileViews.get(key);
+    if (!v) { v = { soil: null, plant: null }; this.tileViews.set(key, v); }
+    const [sx, sy] = iso(t.x, t.y);
+    if (t.st >= 1 && !v.soil) { v.soil = { kind: 'soil', frame: 'tilled', sx, sy, depth: GROUND + 2 }; this._toBucket(v.soil); }
+    if (t.st === 0 && v.soil) { this._unbucket(v.soil); v.soil = null; }
+    let frame = null;
+    if (t.st === 2) frame = `crop_${t.crop}_${Math.min(2, Math.floor((t.g / CROPS[t.crop].grow) * 3))}`;
+    if (t.st === 3) frame = `crop_${t.crop}_3`;
+    if (!frame && v.plant) { this._unbucket(v.plant); v.plant = null; }
+    else if (frame && !v.plant) { v.plant = { kind: 'plant', frame, sx, sy, depth: (t.x + t.y + 0.9) * DEPTH }; this._toBucket(v.plant); }
+    else if (frame && v.plant.frame !== frame) { v.plant.frame = frame; if (v.plant.img) this._setF(v.plant.img, frame); }
+  }
+  _clearTile(t) {
+    const key = this.sim.world.idx(t.x, t.y), v = this.tileViews.get(key);
+    if (!v) return;
+    if (v.soil) this._unbucket(v.soil);
+    if (v.plant) this._unbucket(v.plant);
+    this.tileViews.delete(key);
+  }
+  _unbucket(o) {
+    const b = this.buckets.get(o.key);
+    if (b) { const i = b.indexOf(o); if (i >= 0) b.splice(i, 1); }
+    this._hide(o);
   }
   _bucketKey(sx, sy) { return (Math.floor(sx / CELL_W) + 512) * 4096 + Math.floor(sy / CELL_H) + 512; }
   _toBucket(o) {
@@ -263,7 +293,9 @@ export class GameScene extends Phaser.Scene {
   _consumeEvents() {
     const ev = this.sim.events;
     for (const e of ev) {
-      if (e.t === 'mark') {
+      if (e.t === 'crop') { const f = this.sim.farming.get(e.farmId); if (f) this._syncTile(f, e.i); }
+      else if (e.t === 'farmRemoved') { for (const t of e.tiles) this._clearTile(t); }
+      else if (e.t === 'mark') {
         const o = this.nodeObj.get(e.id);
         if (o) { if (e.value) this._markOn(o); else this._markOff(o); }
       } else if (e.t === 'nodeRemoved') {
@@ -323,7 +355,7 @@ export class GameScene extends Phaser.Scene {
       const d = (x + y + 0.5) * DEPTH;
       if (Math.abs((v.d || 0) - d) > 1) { v.body.setDepth(d); v.cargo.setDepth(d + 0.2); v.d = d; }
       if (c.inv.res) {
-        const cn = `carry_${c.inv.res}`;
+        const cn = `carry_${isFood(c.inv.res) ? 'food' : c.inv.res}`;
         if (v.cargoF !== cn) { this._setF(v.cargo, cn); v.cargoF = cn; }
         v.cargo.setVisible(true).setPosition(Math.round(px), Math.round(py) - 21);
       } else v.cargo.setVisible(false);
@@ -414,7 +446,7 @@ export class GameScene extends Phaser.Scene {
         v = { img: Object.assign(this.add.image(sx, sy + 2, 'atlas', 'pile_wood_1'), { isWorld: true }).setDepth((p.x + p.y + 0.8) * DEPTH) };
         this.pileViews.set(p.id, v);
       }
-      const f = p.res === 'wood' ? `pile_wood_${p.amount >= 9 ? 9 : p.amount >= 6 ? 6 : p.amount >= 3 ? 3 : 1}` : `pile_${p.res}_${Math.min(3, Math.ceil(p.amount / 2))}`;
+      const f = p.res === 'wood' ? `pile_wood_${p.amount >= 9 ? 9 : p.amount >= 6 ? 6 : p.amount >= 3 ? 3 : 1}` : `pile_${isFood(p.res) ? 'food' : p.res}_${Math.min(3, Math.ceil(p.amount / 2))}`;
       if (v.f !== f) { this._setF(v.img, f); v.f = f; }
     }
     for (const [id, v] of this.pileViews) if (!seen.has(id)) { v.img.destroy(); this.pileViews.delete(id); }
@@ -497,6 +529,9 @@ export class GameScene extends Phaser.Scene {
     } else if (s?.type === 'node') {
       const n = this.sim.nodes.get(s.id);
       if (n) this._diamond(g, n.x, n.y, 1, 1, 0xf0d890, 0.95, 0.1); else this.selected = null;
+    } else if (s?.type === 'farm') {
+      const fa = this.sim.farming.get(s.id);
+      if (fa) this._diamond(g, fa.x, fa.y, fa.w, fa.h, 0xf0d890, 0.95, 0.06); else this.selected = null;
     } else if (s?.type === 'pile') {
       const p = this.sim.resources.pile(s.id);
       if (p) this._diamond(g, p.x, p.y, 1, 1, 0xf0d890, 0.95, 0.1); else this.selected = null;
@@ -519,6 +554,12 @@ export class GameScene extends Phaser.Scene {
       const { x0, y0, x1, y1 } = t.rect;
       const col = t.value ? 0xe2733a : 0xbfc8d0;
       this._diamond(f, x0, y0, x1 - x0 + 1, y1 - y0 + 1, col, 1, 0.16);
+    }
+    if (t.kind === 'field' && t.rect) {
+      const { x0, y0, x1, y1 } = t.rect;
+      t.check = this.sim.farming.validate(x0, y0, x1, y1);
+      const col = t.check.ok ? 0x9fd86a : 0xe2553a;
+      this._diamond(f, x0, y0, x1 - x0 + 1, y1 - y0 + 1, col, 1, 0.2);
     }
   }
   placeCheck() {
@@ -557,6 +598,7 @@ export class GameScene extends Phaser.Scene {
   }
   _input() {
     const I = this.input;
+    const isRect = () => this.tool.kind === 'mark' || this.tool.kind === 'field';
     const drag = { on: false, moved: 0, lastX: 0, lastY: 0, pinch: 0, pan: false };
     I.on('wheel', (p, o, dx, dy) => this.camMgr.zoomAt(dy > 0 ? 0.88 : 1.14, p.x, p.y));
     I.on('pointerdown', p => {
@@ -564,13 +606,13 @@ export class GameScene extends Phaser.Scene {
       if (touching >= 2) {
         drag.pinch = Phaser.Math.Distance.Between(I.pointer1.x, I.pointer1.y, I.pointer2.x, I.pointer2.y);
         drag.pan = true; drag.moved = 99;
-        if (this.tool.kind === 'mark') this.tool.rect = null;
+        if (isRect()) this.tool.rect = null;
         return;
       }
       drag.on = true; drag.moved = 0; drag.lastX = p.x; drag.lastY = p.y;
-      drag.pan = this.tool.kind !== 'mark' || p.rightButtonDown() || p.middleButtonDown();
+      drag.pan = !isRect() || p.rightButtonDown() || p.middleButtonDown();
       drag.touch = p.wasTouch;
-      if (this.tool.kind === 'mark' && !drag.pan) { const t = this.tileAt(p.x, p.y); this.tool.a = t; this.tool.rect = { x0: t.x, y0: t.y, x1: t.x, y1: t.y }; }
+      if (isRect() && !drag.pan) { const t = this.tileAt(p.x, p.y); this.tool.a = t; this.tool.rect = { x0: t.x, y0: t.y, x1: t.x, y1: t.y }; }
     });
     I.on('pointermove', p => {
       const t = this.tool;
@@ -593,7 +635,7 @@ export class GameScene extends Phaser.Scene {
       drag.moved += Math.abs(dx) + Math.abs(dy);
       drag.lastX = p.x; drag.lastY = p.y;
       if (drag.pan) { if (drag.moved > 5) this.camMgr.panBy(dx, dy); }
-      else if (t.kind === 'mark' && t.a) {
+      else if (isRect() && t.a) {
         const c = this.tileAt(p.x, p.y);
         t.rect = { x0: Math.min(t.a.x, c.x), y0: Math.min(t.a.y, c.y), x1: Math.max(t.a.x, c.x), y1: Math.max(t.a.y, c.y) };
       }
@@ -603,12 +645,20 @@ export class GameScene extends Phaser.Scene {
       if (!drag.on) return;
       drag.on = false;
       const t = this.tool;
-      if (p.rightButtonReleased?.() && t.kind !== 'mark') { if (drag.moved < 6) this.setTool({ kind: 'select' }); return; }
+      if (p.rightButtonReleased?.() && !isRect()) { if (drag.moved < 6) this.setTool({ kind: 'select' }); return; }
       if (t.kind === 'mark' && t.rect) {
         const r = t.rect;
         const n = this.sim.mark(r.x0, r.y0, r.x1, r.y1, t.types, t.value);
         this.game.events.emit('marked', { n, value: t.value, types: t.types });
         t.rect = null; t.a = null;
+        return;
+      }
+      if (t.kind === 'field' && t.rect) {
+        const r = t.rect;
+        const res = this.sim.farming.place(r.x0, r.y0, r.x1, r.y1, 'potato');
+        t.rect = null; t.a = null;
+        this.game.events.emit('farmPlaced', res);
+        if (res.ok) { this.setTool({ kind: 'select' }); this.selected = { type: 'farm', id: res.farm.id }; }
         return;
       }
       if (drag.moved > 6) return;
@@ -653,9 +703,10 @@ export class GameScene extends Phaser.Scene {
       if (z === 0) {
         if (W.pileAt[i] !== -1) { this.selected = { type: 'pile', id: W.pileAt[i] }; return; }
         if (W.nodeAt[i] !== -1) { this.selected = { type: 'node', id: W.nodeAt[i] }; return; }
+        if (W.fieldAt[i] !== -1) { this.selected = { type: 'farm', id: W.fieldAt[i] }; return; }
       }
     }
     this.selected = null;
   }
 }
-void RES;
+void RES; void T;

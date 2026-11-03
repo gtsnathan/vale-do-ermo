@@ -306,12 +306,35 @@ function beam(p, P, a, b, c = 0x6d4e34) {
 }
 
 // Casa: rotação define onde fica a porta. stage 0 a 4 mostra a obra evoluindo.
-function house(rot, stage) {
-  const wT = 2, hT = 2, ox = 80, oy = 98;
-  const p = new Pix(160, 176, ox, oy), glow = new Pix(160, 176, ox, oy);
+const planks = (light, seed) => (s, t, u, v, x, y) => {
+  const b = Math.floor(u / 6);
+  let c = [0x7a3f2c, 0x83462f, 0x703827][Math.floor(hash(b, 2, seed) * 2.99)];
+  if (u % 6 < 1) c = 0x3a2017;
+  if (hash(x, y, seed) > 0.95) c = shade(c, 0.85);
+  return shade(c, light);
+};
+const shingle = (light, seed) => (s, t, u, v) => {
+  const row = Math.floor(v / 5), n = hash(Math.floor((u + row * 4) / 7), row, seed);
+  const base = n > 0.65 ? 0x5e6068 : n > 0.3 ? 0x50525b : 0x45474f;
+  return shade(v % 5 < 1 ? shade(base, 0.62) : base, light);
+};
+const mossThatch = (light, seed) => (s, t, u, v, x, y) => {
+  const row = Math.floor(v / 4), n = hash(Math.floor((u + row * 3) / 2), row, seed);
+  const base = n > 0.7 ? 0x7c8a4a : n > 0.3 ? 0x687a3d : 0x566631;
+  return shade(v % 4 < 1 ? shade(base, 0.7) : base, light);
+};
+const STYLES = {
+  house: { T: 2, ox: 80, oy: 98, W: 160, Hh: 176, H: 30, R: 30, wall: logWall, roof: thatch, doorW: 11, doorH: 21, chimney: true, win: true },
+  barn: { T: 3, ox: 112, oy: 122, W: 224, Hh: 236, H: 42, R: 42, wall: planks, roof: shingle, doorW: 26, doorH: 32, chimney: false, win: false },
+  gatherer: { T: 2, ox: 80, oy: 90, W: 160, Hh: 168, H: 22, R: 24, wall: logWall, roof: mossThatch, doorW: 12, doorH: 17, chimney: false, win: false },
+};
+function house(rot, stage, style = 'house') {
+  const o = STYLES[style];
+  const wT = o.T, hT = o.T, ox = o.ox, oy = o.oy;
+  const p = new Pix(o.W, o.Hh, ox, oy), glow = new Pix(o.W, o.Hh, ox, oy);
   const P = projector(ox, oy);
   const I = 0.2, x0 = I, y0 = I, x1 = wT - I, y1 = hT - I;
-  const H = 30, R = 30, E = 0.2;
+  const H = o.H, R = o.R, E = 0.2;
   dirtPad(p, P, wT, hT);
   const ridgeX = rot % 2 === 0;
   const doorOnLeft = rot === 0, doorOnRight = rot === 1;
@@ -333,7 +356,7 @@ function house(rot, stage) {
 
   const wallH = stage === 2 ? 16 : H;
   const leftLen = 32 * (x1 - x0), rightLen = 32 * (y1 - y0);
-  const doorW = 11, doorH = 21, winW = 10, winH = 9;
+  const doorW = o.doorW, doorH = o.doorH, winW = 10, winH = 9;
   const wallFn = (base, hasDoor, light, seed) => (s, t, u, v, x, y) => {
     const len = base;
     const uu = s * len, vv = t * H;
@@ -346,7 +369,7 @@ function house(rot, stage) {
         if (Math.abs(vv - 7) < 0.8 || Math.abs(vv - 16) < 0.8) c = 0x2b2622;
         return shade(c, light);
       }
-    } else if (stage >= 3) {
+    } else if (stage >= 3 && o.win) {
       const cx = len / 2;
       if (Math.abs(uu - cx) <= winW / 2 + 1 && vv >= 11 && vv <= 12 + winH) {
         if (Math.abs(uu - cx) > winW / 2 || vv < 12 || vv > 11 + winH) return shade(0x3c2a1c, light);
@@ -355,7 +378,7 @@ function house(rot, stage) {
         return shade(0x1e2730, light * 1.1);
       }
     }
-    return logWall(light, seed)(s, t, u, H - vv, x, y);
+    return o.wall(light, seed)(s, t, u, H - vv, x, y);
   };
   const orig = (vec) => vec;
   // Face esquerda (y=y1) e direita (x=x1), de baixo para cima.
@@ -379,9 +402,9 @@ function house(rot, stage) {
   // Empena triangular e telhado
   const midY = (y0 + y1) / 2, midX = (x0 + x1) / 2;
   if (ridgeX) {
-    p.poly([P(x1, y1, H), P(x1, y0, H), P(x1, midY, H + R)], (x, y) => (hash(x, y >> 2, 3) > 0.5 ? 0x6b5038 : 0x5d4530));
+    p.poly([P(x1, y1, H), P(x1, y0, H), P(x1, midY, H + R)], (x, y) => (style === 'barn' ? (hash(x >> 2, 1, 3) > 0.5 ? 0x5c3022 : 0x53291c) : hash(x, y >> 2, 3) > 0.5 ? 0x6b5038 : 0x5d4530));
   } else {
-    p.poly([P(x0, y1, H), P(x1, y1, H), P(midX, y1, H + R)], (x, y) => (hash(x, y >> 2, 4) > 0.5 ? 0x967352 : 0x866547));
+    p.poly([P(x0, y1, H), P(x1, y1, H), P(midX, y1, H + R)], (x, y) => (style === 'barn' ? (hash(x >> 2, 1, 4) > 0.5 ? 0x8a4a33 : 0x7d4230) : hash(x, y >> 2, 4) > 0.5 ? 0x967352 : 0x866547));
   }
   const roofStage3 = stage === 3;
   const rafter = (light) => (s, t, u, v) => (u % 12 < 2 || v % 11 < 1.2 ? shade(0x856545, light) : null);
@@ -389,16 +412,16 @@ function house(rot, stage) {
   let chimneyBase;
   if (ridgeX) {
     // Lado de trás, depois lado da frente.
-    plane(P(x0 - E, midY, H + R), P(x1 + E, midY, H + R), P(x0 - E, y0 - E, H - 3), roofStage3 ? rafter(0.8) : thatch(0.72, 2));
-    plane(P(x0 - E, midY, H + R), P(x1 + E, midY, H + R), P(x0 - E, y1 + E, H - 3), roofStage3 ? rafter(1.05) : thatch(1.1, 5));
+    plane(P(x0 - E, midY, H + R), P(x1 + E, midY, H + R), P(x0 - E, y0 - E, H - 3), roofStage3 ? rafter(0.8) : o.roof(0.72, 2));
+    plane(P(x0 - E, midY, H + R), P(x1 + E, midY, H + R), P(x0 - E, y1 + E, H - 3), roofStage3 ? rafter(1.05) : o.roof(1.1, 5));
     chimneyBase = [x1 - 0.42, midY - 0.2];
   } else {
-    plane(P(midX, y0 - E, H + R), P(midX, y1 + E, H + R), P(x0 - E, y0 - E, H - 3), roofStage3 ? rafter(1.0) : thatch(1.02, 6));
-    plane(P(midX, y0 - E, H + R), P(midX, y1 + E, H + R), P(x1 + E, y0 - E, H - 3), roofStage3 ? rafter(0.72) : thatch(0.76, 8));
+    plane(P(midX, y0 - E, H + R), P(midX, y1 + E, H + R), P(x0 - E, y0 - E, H - 3), roofStage3 ? rafter(1.0) : o.roof(1.02, 6));
+    plane(P(midX, y0 - E, H + R), P(midX, y1 + E, H + R), P(x1 + E, y0 - E, H - 3), roofStage3 ? rafter(0.72) : o.roof(0.76, 8));
     chimneyBase = [midX - 0.2, y0 + 0.4];
   }
   let smoke = null;
-  if (stage === 4) {
+  if (stage === 4 && o.chimney) {
     const [cx, cy] = chimneyBase;
     const zb = H + R - 16, zt = H + R + 11, c = 0.13;
     const a0 = P(cx - c, cy + c, zt), b0 = P(cx + c, cy + c, zt), c0 = P(cx + c, cy - c, zt);
@@ -466,6 +489,67 @@ function depot(rot, stage) {
   return { p: p.outline(0x1a1411, 100) };
 }
 
+/* ---------- Campos e cultivos ---------- */
+function tilled() {
+  const p = new Pix(66, 34, 33, 1);
+  const P = projector(33, 1);
+  const A = P(0, 0);
+  p.plane(A, [32, 16], [-32, 16], (s, t, u, v, x, y) => {
+    const row = t * 8 % 1;
+    const n = hash(x >> 1, y, 4);
+    const base = row < 0.34 ? (n > 0.6 ? 0x4b3524 : 0x432f20) : row < 0.72 ? (n > 0.6 ? 0x6e5238 : 0x634a33) : 0x7d6044;
+    return base;
+  });
+  return p;
+}
+const PLANTS = {
+  wheat(p, x, y, g, ripe) {
+    const c = ripe ? 0xd9b65a : g === 0 ? 0x7fa24b : g === 1 ? 0x8aa84c : 0xa5ad50, d = ripe ? 0xa98438 : 0x5e7e38;
+    const h = [3, 7, 11][g] + (ripe ? 1 : 0);
+    for (const dx of [-1, 1, 0]) { p.line(x + dx * 2, y, x + dx * 3, y - h, d); if (g >= 1) p.line(x + dx * 3, y - h, x + dx * 3, y - h - (ripe ? 3 : 1), c); }
+    if (g === 0) p.set(x, y - 3, c);
+  },
+  corn(p, x, y, g, ripe) {
+    const h = [4, 11, 18][g];
+    p.line(x, y, x, y - h, 0x5e8a3a); p.line(x + 1, y, x + 1, y - h, 0x4b7330);
+    for (let k = 2; k < h; k += 4) { p.line(x, y - k, x - 4, y - k + 2, 0x79a549); p.line(x + 1, y - k - 1, x + 5, y - k + 1, 0x5e8a3a); }
+    if (ripe) { p.rect(x + 2, y - h + 5, 2, 5, 0xe4c24d); p.rect(x - 2, y - h + 8, 2, 4, 0xd2ae3c); p.line(x, y - h, x, y - h - 2, 0xc9a659); }
+  },
+  potato(p, x, y, g, ripe) {
+    const r = [1.6, 3.2, 4.4][g];
+    p.ellipse(x, y - r * 0.7, r + 0.8, r * 0.8, (u, v) => (u + v < -0.2 ? 0x7da04d : u + v < 0.5 ? 0x5f8439 : 0x4a6c2e));
+    if (ripe) { p.set(x - 1, y - 4, 0xe9e2c8); p.set(x + 2, y - 3, 0xe9e2c8); p.rect(x + 3, y, 2, 1, 0xa98a5a); }
+  },
+  pumpkin(p, x, y, g, ripe) {
+    p.ellipse(x, y - 1, 2 + g * 1.2, 1.3 + g * 0.6, 0x4f7a33);
+    if (g >= 1) { p.ellipse(x - 2, y - 2, 2, 1.3, 0x6a9642); p.ellipse(x + 2, y - 2, 2, 1.3, 0x5b8539); }
+    const col = ripe ? [0xf0a13c, 0xd97f28, 0xb5621c] : [0xa7b04d, 0x8e9a3e, 0x74832f];
+    if (g === 2 || ripe) p.ellipse(x + 1, y - 2.5, ripe ? 4.4 : 3, ripe ? 3.4 : 2.4, (u, v) => col[u + v < -0.2 ? 0 : u + v < 0.5 ? 1 : 2]);
+    if (ripe) p.set(x + 1, y - 6, 0x4f7a33);
+  },
+  beans(p, x, y, g, ripe) {
+    const h = [3, 9, 14][g];
+    if (g >= 1) p.line(x, y, x, y - h, 0x8a6d47);
+    for (let k = 1; k < h; k += 2) p.ellipse(x + (k % 4 < 2 ? -1 : 1), y - k, 1.9, 1.3, k % 3 ? 0x5f8c3d : 0x76a44b);
+    if (ripe) for (let k = 3; k < h; k += 4) { p.set(x + 2, y - k, 0x9dbd5c); p.set(x + 2, y - k + 1, 0x9dbd5c); p.set(x - 2, y - k + 2, 0x9dbd5c); }
+  },
+  cabbage(p, x, y, g, ripe) {
+    const r = [1.6, 3, 4.2 + (ripe ? 0.6 : 0)][g];
+    p.ellipse(x, y - r * 0.6, r + 0.8, r * 0.75, (u, v) => (u * u + v * v < 0.2 ? (ripe ? 0xcfe39a : 0x9cc36c) : u + v < 0 ? 0x86b35c : 0x5f9148));
+    if (g === 2) p.line(x - 2, y - 2, x + 2, y - 3, 0x4c7a3b);
+  },
+};
+function crop(name, stage) {
+  const p = new Pix(66, 44, 33, 30);
+  const P = projector(33, 30);
+  const ripe = stage === 3, g = Math.min(2, stage);
+  for (const [a, b] of [[0.25, 0.3], [0.62, 0.22], [0.3, 0.68], [0.72, 0.62], [0.5, 0.48], [0.12, 0.55], [0.55, 0.85], [0.85, 0.35]]) {
+    const [x, y] = P(a, b);
+    PLANTS[name](p, Math.round(x), Math.round(y), g, ripe);
+  }
+  return p;
+}
+
 export function buildAll(add) {
   const addPix = (name, pix) => add(name, pix.trim());
   for (let v = 0; v < 3; v++) {
@@ -483,6 +567,15 @@ export function buildAll(add) {
   for (let look = 0; look < 6; look++) for (const dir of ['f', 'b']) {
     for (const fr of ['i', 'w0', 'w1', 'w2', 'w3', 't0', 't1', 's']) addPix(`c${look}_${dir}_${fr}`, citizenFrame(look, dir, fr));
   }
+  addPix('carry_food', (() => {
+    const p = new Pix(14, 12, 7, 9);
+    p.ellipse(7, 6, 5, 4, (u, v, x, y) => (y % 2 ? 0xa07c48 : 0xbb9558));
+    p.ellipse(7, 3, 4, 1.8, (u, v, x, y) => [0xd9863a, 0xc2483a, 0xa7b04d][Math.floor(hash(x, y, 2) * 3)]);
+    return p.outline(0x1a1411, 150);
+  })());
+  [1, 2, 3].forEach(n => addPix(`pile_food_${n}`, heap([0x7a5b34, 0x93703f, 0xad884f, 0xc7a264, 0xd9863a, 0xe0a14c], n, 11, false)));
+  add('tilled', tilled());
+  for (const name of Object.keys(PLANTS)) for (let st = 0; st < 4; st++) addPix(`crop_${name}_${st}`, crop(name, st));
   const meta = { smoke: {} };
   for (let rot = 0; rot < 4; rot++) {
     for (let st = 0; st <= 4; st++) {
@@ -493,6 +586,8 @@ export function buildAll(add) {
         meta.smoke[`house_r${rot}`] = [h.smoke[0] - h.p.ox, h.smoke[1] - h.p.oy];
       }
       addPix(`depot_r${rot}_s${st}`, depot(rot, st).p);
+      addPix(`barn_r${rot}_s${st}`, house(rot, st, 'barn').p);
+      addPix(`gatherer_r${rot}_s${st}`, house(rot, st, 'gatherer').p);
     }
   }
   // Fumaça, brilho na água, marcadores
@@ -519,6 +614,12 @@ export function buildAll(add) {
 // Ícones da interface, desenhados à mão em grade 16×16.
 const pal = { a: 0x3b2a1c, b: 0x7a5a3c, c: 0xc8cbcf, d: 0x8d9198, e: 0xd9b872, f: 0x6d9a4e, g: 0xe2733a, h: 0xf0e4c4, i: 0x8c6239, j: 0x62544a, k: 0xb4b1aa };
 const ICONS = {
+  build: ['................', '........cc......', '.......cccc.....', '......ccccc.....', '.....ccb.cc.....', '....bbb..c......', '...bbb..........', '..bbb...........', '.bbb............', '.bb....ee.......', '......eeee......', '.....eeeeee.....', '......bbbb......', '......baab......', '......baab......', '................'],
+  manage: ['................', '...aaaaaaaaaa...', '..hhhhhhhhhhhh..', '..h..........h..', '..h.ff.aaaaa.h..', '..h.ff.......h..', '..h..........h..', '..h.ee.aaaaa.h..', '..h.ee.......h..', '..h..........h..', '..h.gg.aaaaa.h..', '..h.gg.......h..', '..h..........h..', '..hhhhhhhhhhhh..', '................', '................'],
+  food: ['................', '.......b........', '......fb........', '.....ffb........', '....ggggggg.....', '...ggggggggg....', '..gggggggggg....', '..gggeggggggg...', '..ggeegggggggg..', '..gggggggggggg..', '..ggggggggggg...', '...gggggggggg...', '....ggggggg.....', '................', '................', '................'],
+  barn: ['................', '......jjjj......', '....jjjjjjjj....', '..jjjjjjjjjjjj..', '.jjjjjjjjjjjjjj.', '..gggggggggggg..', '..gggghhhhgggg..', '..gggh....hggg..', '..gghh....hhgg..', '..ggh.a..a.hgg..', '..ggha.aa.ahgg..', '..gghaa..aahgg..', '..ggha.aa.ahgg..', '..gghhhhhhhhgg..', '................', '................'],
+  gatherer: ['................', '......ff........', '....ffffff......', '..ffffffffff....', '.ffffffffffff...', '...bbbbbbbb.....', '...bbaabbbb.....', '...bbaabbbb.gg..', '...bbaabbb.gggg.', '...........ggggg', '..........jjjjjj', '...........jjjj.', '................', '................', '................', '................'],
+  farm: ['................', '.....e...e...e..', '....eee.eee.eee.', '.....e...e...e..', '.....f...f...f..', '.aaaaaaaaaaaaaa.', '.ibibibibibibib.', '.aaaaaaaaaaaaaa.', '.ibibibibibibib.', '.aaaaaaaaaaaaaa.', '.ibibibibibibib.', '.aaaaaaaaaaaaaa.', '................', '................', '................', '................'],
   select: ['................', '...hh...........', '...hah..........', '...haah.........', '...haaah........', '...haaaah.......', '...haaaaah......', '...haaaaaah.....', '...haaaaaaah....', '...haaaahhhh....', '...haahah.......', '...hah.hah......', '...hh..hah......', '........hh......', '................', '................'],
   axe: ['................', '.........cccc...', '.......ccccccc..', '......cckkccccc.', '......cckbbcccc.', '.......cbbbccc..', '.......bbb.cc...', '......bbb.......', '.....bbb........', '....bbb.........', '...bbb..........', '..bbb...........', '.bbb............', '.bb.............', '................', '................'],
   pick: ['................', '...cccccccc.....', '.cccc....bbcc...', 'ccc.....bbb.ccc.', 'cc.....bbb...ccc', '......bbb.....cc', '.....bbb.......c', '....bbb.........', '...bbb..........', '..bbb...........', '.bbb............', 'bbb.............', 'bb..............', '................', '................', '................'],

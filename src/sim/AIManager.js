@@ -1,4 +1,4 @@
-import { NODE, STEP, WALK } from './defs.js';
+import { FARM_WORK, HUNGER_RATE, NODE, STEP, WALK } from './defs.js';
 
 // Máquina de estados dos aldeões: anda, pega, carrega, entrega, trabalha.
 export class AIManager {
@@ -7,7 +7,10 @@ export class AIManager {
   update(c) {
     const S = this.sim, W = S.world;
     c.px = c.x; c.py = c.y;
+    c.hunger = Math.min(100, c.hunger + HUNGER_RATE * STEP * (c.inside ? 0.5 : 1));
     if (c.inside) {
+      const home = S.building(c.home);
+      if (home && c.hunger > 45) S.population.eatFromPantry(c, home);
       if (!S.isNight()) { c.inside = false; c.task = null; c.think = S.rng.next() * 2; }
       return;
     }
@@ -63,7 +66,8 @@ export class AIManager {
     const tx = nx + 0.5, ty = ny + 0.5;
     const cur = W.idx(c.x | 0, c.y | 0);
     const dx = tx - c.x, dy = ty - c.y, d = Math.hypot(dx, dy);
-    const step = (WALK * STEP) / W.costI(cur);
+    // Quem passa fome anda mais devagar. Doenças e mortes por fome entram na versão 0.3.
+    const step = (WALK * STEP) / W.costI(cur) * (c.hunger >= 95 ? 0.7 : 1);
     this._face(c, dx, dy);
     c.anim = 'walk';
     if (d <= step) { c.x = tx; c.y = ty; c.pathI++; }
@@ -82,9 +86,11 @@ export class AIManager {
     const r = this._go(c, [[d.door.x, d.door.y]]);
     if (r === 'fail') return this._fail(c);
     if (r !== 'arrived') return;
-    d.stock[c.inv.res] += c.inv.amount;
+    d.stock[c.inv.res] += t.n;
     d.incoming -= t.n;
-    c.inv.res = null; c.inv.amount = 0; c.task = null; c.think = 0.2;
+    c.inv.amount -= t.n;
+    if (c.inv.amount <= 0) { c.inv.res = null; c.inv.amount = 0; }
+    c.task = null; c.think = 0.2;
   }
   _dropCargo(c) {
     const S = this.sim;
@@ -177,6 +183,7 @@ export class AIManager {
     const r = this._go(c, [[b.door.x, b.door.y]]);
     if (r === 'fail') return this._fail(c);
     if (r !== 'arrived') return;
+    if (c.hunger > 25) S.population.eatFromPantry(c, b);
     c.inside = true; c.task = null; c.anim = 'idle';
   }
   _camp(c, t) {
@@ -192,6 +199,77 @@ export class AIManager {
     const r = this._go(c, [t.spot]);
     if (r === 'fail') { t.there = true; return; }
     if (r === 'arrived') t.there = true;
+  }
+  _eat(c, t) {
+    const S = this.sim, b = S.building(t.buildingId);
+    if (!b || !b.done) return S.jobs.abort(c);
+    const r = this._go(c, [[b.door.x, b.door.y]]);
+    if (r === 'fail') return this._fail(c);
+    if (r !== 'arrived') return;
+    S.population.eatFromPantry(c, b);
+    c.task = null; c.think = 0.5;
+  }
+  _eatBarn(c, t) {
+    const S = this.sim, d = S.building(t.depotId);
+    if (!d || !d.done) return S.jobs.abort(c);
+    const r = this._go(c, [[d.door.x, d.door.y]]);
+    if (r === 'fail') return this._fail(c);
+    if (r !== 'arrived') return;
+    d.stock[t.res]--; d.reserved[t.res]--;
+    S.population.meal(c, t.res);
+    c.task = null; c.think = 0.5;
+  }
+  _fetch(c, t) {
+    const S = this.sim, d = S.building(t.depotId), home = S.building(t.buildingId);
+    if (!home || !home.done) return S.jobs.abort(c);
+    if (t.step === 0) {
+      if (!d || !d.done) return S.jobs.abort(c);
+      const r = this._go(c, [[d.door.x, d.door.y]]);
+      if (r === 'fail') return this._fail(c);
+      if (r !== 'arrived') return;
+      d.stock[t.res] -= t.n; d.reserved[t.res] -= t.n;
+      c.inv.res = t.res; c.inv.amount = t.n;
+      t.step = 1;
+      return;
+    }
+    const r = this._go(c, [[home.door.x, home.door.y]]);
+    if (r === 'fail') return this._fail(c);
+    if (r !== 'arrived') return;
+    home.pantry[t.res] = (home.pantry[t.res] || 0) + t.n;
+    home.fetching = null;
+    c.inv.res = null; c.inv.amount = 0; c.task = null; c.think = 0.2;
+  }
+  _farm(c, t) {
+    const S = this.sim, farm = S.farming.get(t.farmId), tile = farm?.tiles[t.i];
+    if (!tile || S.isNight()) return S.jobs.abort(c);
+    if (!t.there) {
+      const r = this._go(c, [[tile.x, tile.y]]);
+      if (r === 'fail') return this._fail(c, farm);
+      if (r !== 'arrived') return;
+      t.there = true;
+    }
+    c.anim = 'work'; c.tool = 'hoe';
+    t.w += STEP;
+    if (t.w < FARM_WORK[tile.st]) return;
+    S.farming.finishTile(farm, t.i, c);
+    c.task = null; c.think = 0.1; c.anim = 'idle';
+  }
+  _forage(c, t) {
+    const S = this.sim;
+    if (S.isNight()) return S.jobs.abort(c);
+    if (!t.there) {
+      const r = this._go(c, [t.spot]);
+      if (r === 'fail') { S.jobs.abort(c); c.think = 0.5; return; }
+      if (r !== 'arrived') return;
+      t.there = true;
+    }
+    c.anim = 'work'; c.tool = 'hoe';
+    t.w += STEP;
+    if (t.w < 7) return;
+    const res = c.inv.res || (S.rng.chance(0.6) ? 'berries' : 'mushroom');
+    c.inv.res = res; c.inv.amount += 2;
+    S.stats.produced[res] += 2;
+    c.task = null; c.think = 0.2; c.anim = 'idle';
   }
   _idle(c, t) {
     const S = this.sim;

@@ -1,4 +1,5 @@
 import { Simulation } from './Simulation.js';
+import { DIFFICULTY, FOODS, RES } from './defs.js';
 
 // O mapa é refeito pela semente; salva-se só o que mudou desde a geração.
 export const SaveManager = {
@@ -9,23 +10,24 @@ export const SaveManager = {
     const changed = [];
     for (const n of sim.nodes.values()) if (n.marked || n.work > 0) changed.push({ id: n.id, marked: n.marked, work: n.work, reservedBy: n.reservedBy });
     return JSON.stringify({
-      v: 1, config: sim.config, time: sim.time, steps: sim.steps, nextId: sim.nextId, rng: sim.rng.s,
+      v: 2, config: sim.config, time: sim.time, steps: sim.steps, nextId: sim.nextId, rng: sim.rng.s,
       startStock: sim.startStock, stats: sim.stats, removed, changed,
-      buildings: sim.buildings, piles: sim.piles, citizens: sim.citizens,
+      buildings: sim.buildings, piles: sim.piles, citizens: sim.citizens, farms: sim.farms,
     });
   },
   load(text) {
     const d = JSON.parse(text);
-    if (d.v !== 1) throw new Error('Versão de salvamento desconhecida');
+    if (d.v !== 1 && d.v !== 2) throw new Error('Versão de salvamento desconhecida');
     const sim = new Simulation(d.config);
     const W = sim.world;
     for (const b of sim.buildings) {
       for (let j = b.y; j < b.y + b.h; j++) for (let i = b.x; i < b.x + b.w; i++) W.buildingAt[W.idx(i, j)] = -1;
       W.doorAt[W.idx(b.door.x, b.door.y)]--;
     }
-    sim.buildings = d.buildings; sim.citizens = d.citizens; sim.piles = d.piles;
+    sim.buildings = d.buildings; sim.citizens = d.citizens; sim.piles = d.piles; sim.farms = d.farms || [];
     Object.assign(sim, { time: d.time, steps: d.steps, nextId: d.nextId, startStock: d.startStock, stats: d.stats });
     sim.rng.s = d.rng;
+    if (d.v === 1) this._fromV1(sim);
     for (const id of d.removed) { const n = sim.nodes.get(id); if (n) sim.removeNode(n); }
     for (const c of d.changed) {
       const n = sim.nodes.get(c.id);
@@ -35,8 +37,36 @@ export const SaveManager = {
     }
     for (const b of sim.buildings) sim.construction.occupy(b);
     for (const p of sim.piles) W.pileAt[W.idx(p.x, p.y)] = p.id;
+    for (const f of sim.farms) for (const t of f.tiles) W.fieldAt[W.idx(t.x, t.y)] = f.id;
+    W.recomputeComps();
+    if (d.v === 1) this._giveBarn(sim);
     sim.events = [];
     W.recomputeComps();
     return sim;
+  },
+  // Vilas da versão 0.1 ganham os campos novos e o celeiro inicial.
+  _fromV1(sim) {
+    const fill = o => { for (const r of RES) o[r] = o[r] || 0; };
+    fill(sim.stats.produced); fill(sim.stats.consumed); fill(sim.startStock);
+    for (const b of sim.buildings) {
+      for (const k of ['stock', 'reserved', 'delivered', 'enroute']) if (b[k]) fill(b[k]);
+      if (b.type === 'house' && b.done && !b.pantry) b.pantry = {};
+    }
+    for (const c of sim.citizens) {
+      c.profession = 'laborer'; c.workplace = null; c.lastMeal = null;
+    }
+    sim.citizens.filter(c => c.sex === 'M').slice(0, 2).forEach(c => { c.profession = 'builder'; });
+  },
+  _giveBarn(sim) {
+    const st = sim.world.start;
+    for (let r = 3; r < 40; r++) for (let y = st.y - r; y <= st.y + r; y++) for (let x = st.x - r; x <= st.x + r; x++) {
+      if (!sim.construction.validate('barn', x, y, 0).ok) continue;
+      const b = sim.construction._create('barn', x, y, 0);
+      b.done = true;
+      sim.storage.newStock(b);
+      const start = DIFFICULTY[sim.config.difficulty].start;
+      for (const f of FOODS) { b.stock[f] = start[f] || 0; sim.startStock[f] += b.stock[f]; }
+      return;
+    }
   },
 };

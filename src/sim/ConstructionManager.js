@@ -75,11 +75,8 @@ export class ConstructionManager {
     b.done = true;
     for (const r of RES) { this.sim.stats.consumed[r] += b.delivered[r]; b.delivered[r] = 0; }
     b.builders = [];
-    if (b.type === 'depot') {
-      b.stock = {}; b.reserved = {};
-      for (const r of RES) { b.stock[r] = 0; b.reserved[r] = 0; }
-      b.incoming = 0;
-    }
+    if (BUILDINGS[b.type].stores) this.sim.storage.newStock(b);
+    if (b.type === 'house') b.pantry = {};
     this.sim.stats.built[b.type] = (this.sim.stats.built[b.type] || 0) + 1;
     this.sim.events.push({ t: 'built', id: b.id });
     if (b.type === 'house') this.sim.population.assignHomes();
@@ -89,7 +86,8 @@ export class ConstructionManager {
   remove(b) {
     const S = this.sim, W = S.world;
     S.jobs.abortFor(b.id);
-    if (b.type === 'depot' && b.done) for (const r of RES) if (b.stock[r] > 0) S.resources.drop(b.door.x, b.door.y, r, b.stock[r]);
+    if (BUILDINGS[b.type].stores && b.done) for (const r of RES) if (b.stock[r] > 0) S.resources.drop(b.door.x, b.door.y, r, b.stock[r]);
+    if (b.pantry) for (const r in b.pantry) if (b.pantry[r] > 0) S.resources.drop(b.door.x, b.door.y, r, b.pantry[r]);
     if (!b.done) for (const r of RES) if (b.delivered[r] > 0) S.resources.drop(b.door.x, b.door.y, r, b.delivered[r]);
     if (b.done) {
       const cost = BUILDINGS[b.type].cost;
@@ -99,6 +97,7 @@ export class ConstructionManager {
       }
       S.stats.consumed.wood += 0;
     }
+    for (const c of S.citizens) if (c.workplace === b.id) c.workplace = null;
     for (const id of b.residents) {
       const c = S.citizen(id);
       if (c) { c.home = null; if (c.inside) { c.inside = false; c.x = b.door.x + 0.5; c.y = b.door.y + 0.5; } }

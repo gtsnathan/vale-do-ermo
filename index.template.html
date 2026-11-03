@@ -74,6 +74,32 @@ button, select, input { font: inherit; color: inherit; }
 .sep { flex: none; width: 2px; background: var(--wood); margin: 3px; }
 :focus-visible { outline: 2px solid var(--straw); outline-offset: 1px; }
 
+#drawer { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; padding: 4px; pointer-events: auto; max-width: 100%; }
+.dr { display: flex; align-items: center; gap: 7px; width: 182px; padding: 5px 7px; background: var(--peat2); border: 1px solid var(--wood); text-align: left; cursor: pointer; }
+.dr:hover { background: var(--wood); }
+.dr span { display: flex; flex-direction: column; min-width: 0; line-height: 1.1; }
+.dr em { font-style: normal; font-size: 13px; color: var(--ash); }
+#manage { left: max(10px, env(safe-area-inset-left, 0px)); top: 64px; width: 310px; max-height: min(74vh, 620px); }
+#manage h3 { margin: 6px 0 2px; font: 700 15px var(--display); color: var(--straw); }
+#manage h3:first-child { margin-top: 0; }
+.prof { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 0; border-bottom: 1px solid var(--peat2); }
+.prof span { display: flex; flex-direction: column; min-width: 0; line-height: 1.15; }
+.prof em { font-style: normal; font-size: 13px; color: var(--ash); }
+.step { display: inline-flex; align-items: center; gap: 7px; flex: none; font-variant-numeric: tabular-nums; }
+.step.solo { padding-right: 38px; }
+.step button { width: 30px; height: 30px; background: var(--peat2); border: 1px solid var(--wood); font-weight: 700; font-size: 17px; line-height: 1; cursor: pointer; }
+.step button:hover { background: var(--wood); }
+.tw { overflow-x: auto; margin-top: 5px; }
+.tw table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+.tw th { font-weight: 500; font-size: 13px; color: var(--ash); text-align: right; padding: 2px 0 2px 8px; border-bottom: 1px solid var(--wood); }
+.tw td { text-align: right; padding: 2px 0 2px 8px; }
+.tw th:first-child, .tw td:first-child { text-align: left; padding-left: 0; }
+.crops { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; margin-bottom: 2px; }
+.crop { min-height: 30px; padding: 2px; background: var(--peat2); border: 1px solid var(--wood); font-size: 14px; cursor: pointer; }
+.crop:hover { background: var(--wood); }
+.crop.on { background: #5a4629; border-color: var(--straw); color: var(--straw); }
+.note.warn { color: #ffb48c; }
+.bar.hunger i { background: var(--ember); }
 #toast { position: fixed; left: 50%; bottom: calc(112px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 8; padding: 6px 12px; width: max-content; max-width: calc(100vw - 32px); text-align: center; pointer-events: none; font-size: 14px; }
 
 .panel { position: fixed; z-index: 6; width: 262px; max-width: calc(100vw - 16px); max-height: min(62vh, 500px); display: flex; flex-direction: column; }
@@ -132,6 +158,8 @@ button, select, input { font: inherit; color: inherit; }
   #goals { padding: 5px 8px; }
   #inspect { top: auto; bottom: 88px; right: 8px; left: 8px; width: auto; max-height: 42vh; }
   #people { left: 8px; right: 8px; width: auto; bottom: 88px; }
+  #manage { left: 8px; right: 8px; width: auto; top: auto; bottom: 88px; max-height: 66vh; }
+  .dr { width: calc(50% - 2px); }
   #toast { bottom: auto; top: calc(98px + env(safe-area-inset-top, 0px)); }
   #inspect .note { display: none; }
   #menu { align-items: flex-end; padding-left: max(10px, env(safe-area-inset-left, 0px)); padding-right: max(10px, env(safe-area-inset-right, 0px)); }
@@ -164,6 +192,7 @@ button, select, input { font: inherit; color: inherit; }
       <button class="btn" id="b-x">Cancelar</button>
       <span id="h-why"></span>
     </div>
+    <div id="drawer" class="plate" hidden></div>
     <div id="tools" class="plate"></div>
   </div>
 </div>
@@ -176,10 +205,14 @@ button, select, input { font: inherit; color: inherit; }
   <div class="ph"><span class="pt">Aldeões</span><button class="px" aria-label="Fechar">×</button></div>
   <div class="pb"></div>
 </section>
+<section class="panel plate" id="manage" hidden aria-label="Gestão">
+  <div class="ph"><span class="pt">Gestão da vila</span><button class="px" aria-label="Fechar">×</button></div>
+  <div class="pb"></div>
+</section>
 <div id="menu" hidden>
   <div id="card">
     <h1>Vale do Ermo</h1>
-    <p>Dez aldeões, uma carroça de madeira e um vale sem dono. Você decide o que erguer. Eles carregam cada tora nas costas.</p>
+    <p>Dez aldeões, comida para poucos dias e um vale sem dono. Você decide o que erguer e o que plantar. Eles carregam cada tora nas costas.</p>
     <div class="f">
       <label>Tamanho do mapa<select id="m-size"></select></label>
       <label>Dificuldade<select id="m-diff"></select></label>

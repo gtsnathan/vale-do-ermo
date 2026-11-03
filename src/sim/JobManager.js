@@ -1,4 +1,4 @@
-import { CARRY, NODE, RES, BUILDINGS } from './defs.js';
+import { CARRY, FARM_WORK, FORAGE_RADIUS, HUNGRY, NODE, PANTRY_LOW, PANTRY_TRIP, RES, RES_LABEL, BUILDINGS, isFood } from './defs.js';
 
 // Decide o que cada aldeão faz a seguir e reserva tudo antes de ele sair andando.
 // Reserva antes de caminhar é o que impede dois aldeões de buscarem a mesma carga.
@@ -8,9 +8,67 @@ export class JobManager {
   assign(c) {
     const S = this.sim, W = S.world;
     const comp = W.compAt(c.x | 0, c.y | 0);
-    if (c.inv.res) return this._cargo(c, comp);
+    if (c.inv.res) {
+      if (!S.isNight() && (this._farmNext(c, comp) || this._forage(c, comp))) return true;
+      return this._cargo(c, comp);
+    }
     if (S.isNight()) return this._rest(c);
-    return this._build(c, comp) || this._supply(c, comp) || this._haul(c, comp) || this._harvest(c, comp) || this._idle(c);
+    return this._eat(c, comp) || this._fetch(c, comp)
+      || (c.profession === 'builder' && this._build(c, comp))
+      || (c.profession === 'farmer' && this._farmNext(c, comp))
+      || (c.profession === 'gatherer' && this._forage(c, comp))
+      || this._supply(c, comp) || this._haul(c, comp) || this._harvest(c, comp) || this._idle(c);
+  }
+
+  // Comer em casa se houver despensa; sem isso, come direto no celeiro.
+  _eat(c, comp) {
+    if (c.hunger < HUNGRY) return false;
+    const S = this.sim, home = c.home != null ? S.building(c.home) : null;
+    if (home && home.done && S.population.pantryTotal(home) > 0) {
+      c.task = { kind: 'eat', buildingId: home.id };
+      return true;
+    }
+    const d = S.storage.nearestFood(c.x, c.y, comp);
+    if (!d) return false;
+    const res = S.storage.bestFood(d);
+    d.reserved[res]++;
+    c.task = { kind: 'eatBarn', depotId: d.id, res };
+    return true;
+  }
+  // Um morador por vez busca comida para abastecer a casa.
+  _fetch(c, comp) {
+    const S = this.sim, home = c.home != null ? S.building(c.home) : null;
+    if (!home || !home.done || home.fetching != null || S.population.pantryTotal(home) >= PANTRY_LOW) return false;
+    if (S.world.compAt(home.door.x, home.door.y) !== comp) return false;
+    const d = S.storage.nearestFood(home.door.x, home.door.y, comp);
+    if (!d) return false;
+    const res = S.storage.bestFood(d);
+    const n = Math.min(PANTRY_TRIP, S.storage.available(d, res));
+    d.reserved[res] += n;
+    home.fetching = c.id;
+    c.task = { kind: 'fetch', depotId: d.id, buildingId: home.id, res, n, step: 0 };
+    return true;
+  }
+  _farmNext(c, comp) {
+    if (c.profession !== 'farmer' || c.workplace == null) return false;
+    const S = this.sim, farm = S.farming.get(c.workplace);
+    if (!farm) return false;
+    const pick = S.farming.pickTile(farm, c, comp);
+    if (pick < 0) return false;
+    farm.tiles[pick].reservedBy = c.id;
+    c.task = { kind: 'farm', farmId: farm.id, i: pick, w: 0 };
+    return true;
+  }
+  _forage(c, comp) {
+    if (c.profession !== 'gatherer' || c.workplace == null) return false;
+    if (c.inv.res && c.inv.amount + 2 > CARRY[c.inv.res]) return false;
+    const S = this.sim, hut = S.building(c.workplace);
+    if (!hut || !hut.done) return false;
+    const spot = S.farming.forageSpot(hut, c, comp);
+    if (!spot) return false;
+    S.world.forageUntil[S.world.idx(spot[0], spot[1])] = S.time + S.farming.forageRest;
+    c.task = { kind: 'forage', spot, w: 0 };
+    return true;
   }
 
   ring(b) {
@@ -22,10 +80,12 @@ export class JobManager {
   reachable(list, comp) { return list.filter(([x, y]) => this.sim.world.compAt(x, y) === comp); }
 
   _cargo(c, comp) {
-    const d = this.sim.storage.nearestWithSpace(c.x, c.y, comp);
+    const d = this.sim.storage.nearestWithSpace(c.x, c.y, comp, c.inv.res);
     if (!d) { c.task = { kind: 'dropCargo' }; return true; }
-    d.incoming += c.inv.amount;
-    c.task = { kind: 'cargo', depotId: d.id, n: c.inv.amount };
+    // Reserva só o espaço que existe; o que sobrar sai em outra viagem ou fica no chão.
+    const n = Math.min(c.inv.amount, this.sim.storage.free(d));
+    d.incoming += n;
+    c.task = { kind: 'cargo', depotId: d.id, n };
     return true;
   }
   _rest(c) {
@@ -90,11 +150,11 @@ export class JobManager {
     for (const p of S.piles) {
       if (p.amount - p.reserved <= 0 || p.cooldown > S.time || W.compAt(p.x, p.y) !== comp) continue;
       const dist = Math.abs(p.x - c.x) + Math.abs(p.y - c.y);
-      if (dist < bd) { bd = dist; best = p; }
+      if (dist >= bd || !S.storage.nearestWithSpace(p.x, p.y, comp, p.res)) continue;
+      bd = dist; best = p;
     }
     if (!best) return false;
-    const d = S.storage.nearestWithSpace(best.x, best.y, comp);
-    if (!d) return false;
+    const d = S.storage.nearestWithSpace(best.x, best.y, comp, best.res);
     const n = Math.min(CARRY[best.res], best.amount - best.reserved, S.storage.free(d));
     best.reserved += n;
     d.incoming += n;
@@ -152,6 +212,14 @@ export class JobManager {
         break;
       }
       case 'harvest': { const n = S.nodes.get(t.nodeId); if (n) n.reservedBy = null; break; }
+      case 'eatBarn': { const d = S.building(t.depotId); if (d && d.done) d.reserved[t.res]--; break; }
+      case 'fetch': {
+        const h = S.building(t.buildingId);
+        if (h) h.fetching = null;
+        if (t.step === 0) { const d = S.building(t.depotId); if (d && d.done) d.reserved[t.res] -= t.n; }
+        break;
+      }
+      case 'farm': { const f = S.farming.get(t.farmId); if (f && f.tiles[t.i]) f.tiles[t.i].reservedBy = null; break; }
     }
     c.task = null;
   }
@@ -166,19 +234,27 @@ export class JobManager {
     if (c.inside) return 'Descansando em casa';
     if (!t) return 'Decidindo o que fazer';
     const S = this.sim;
-    const lab = { wood: 'madeira', stone: 'pedra', iron: 'ferro' };
+    const low = r => (RES_LABEL[r] || 'carga').toLowerCase();
     switch (t.kind) {
-      case 'cargo': return `Levando ${lab[c.inv.res] || 'carga'} ao depósito`;
-      case 'dropCargo': return 'Depósitos cheios, soltando a carga';
+      case 'cargo': return `Levando ${low(c.inv.res)} para guardar`;
+      case 'dropCargo': return 'Sem espaço para guardar, soltando a carga';
       case 'home': return 'Voltando para casa';
       case 'camp': return 'Sem casa, passando a noite ao relento';
       case 'build': return `Construindo ${BUILDINGS[S.building(t.siteId)?.type]?.name?.toLowerCase() || 'obra'}`;
-      case 'deliver': return t.step === 0 ? `Buscando ${lab[t.res]} para a obra` : `Levando ${lab[t.res]} à obra`;
-      case 'haul': return t.step === 0 ? `Indo recolher ${lab[t.res]}` : `Levando ${lab[t.res]} ao depósito`;
+      case 'deliver': return t.step === 0 ? `Buscando ${low(t.res)} para a obra` : `Levando ${low(t.res)} à obra`;
+      case 'haul': return t.step === 0 ? `Indo recolher ${low(t.res)}` : `Levando ${low(t.res)} para guardar`;
       case 'harvest': { const n = S.nodes.get(t.nodeId); return n ? ({ tree: 'Cortando árvore', stone: 'Quebrando pedra', iron: 'Extraindo ferro' })[n.type] : 'Coletando'; }
       case 'idle': return 'Sem tarefa, aguardando';
+      case 'eat': return 'Indo comer em casa';
+      case 'eatBarn': return 'Indo comer no celeiro';
+      case 'fetch': return t.step === 0 ? `Buscando ${low(t.res)} no celeiro` : 'Levando comida para casa';
+      case 'forage': return 'Coletando na mata';
+      case 'farm': {
+        const f = S.farming.get(t.farmId), st = f?.tiles[t.i]?.st;
+        return st === 0 ? 'Preparando a terra' : st === 1 ? 'Plantando' : 'Colhendo';
+      }
     }
     return '';
   }
 }
-export { NODE };
+export { NODE, FARM_WORK, FORAGE_RADIUS, isFood };

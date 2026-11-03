@@ -1,5 +1,5 @@
 import { RNG, hashSeed } from './rng.js';
-import { BUILDINGS, DAY, DIFFICULTY, MAP_SIZES, NIGHT_END, NIGHT_START, NODE, RES, STEP } from './defs.js';
+import { BUILDINGS, DAY, DIFFICULTY, FOODS, HUNGRY, MAP_SIZES, NIGHT_END, NIGHT_START, NODE, PROFESSIONS, RES, STEP } from './defs.js';
 import { generateTerrain } from './TerrainGenerator.js';
 import { WorldManager } from './WorldManager.js';
 import { PathfindingSystem } from './PathfindingSystem.js';
@@ -8,6 +8,7 @@ import { ConstructionManager } from './ConstructionManager.js';
 import { JobManager } from './JobManager.js';
 import { AIManager } from './AIManager.js';
 import { PopulationManager } from './CitizenManager.js';
+import { FarmingManager } from './FarmingManager.js';
 
 // Núcleo sem renderização: roda igual no navegador e nos testes em Node.
 export class Simulation {
@@ -23,9 +24,9 @@ export class Simulation {
     this.steps = 0;
     this.events = [];
     this.alerts = [];
-    this.buildings = []; this.citizens = []; this.piles = [];
+    this.buildings = []; this.citizens = []; this.piles = []; this.farms = [];
     this.nodes = new Map(); this.markedNodes = new Set();
-    this.stats = { produced: { wood: 0, stone: 0, iron: 0 }, consumed: { wood: 0, stone: 0, iron: 0 }, placed: {}, built: {}, everMarked: 0 };
+    this.stats = { produced: Object.fromEntries(RES.map(r => [r, 0])), consumed: Object.fromEntries(RES.map(r => [r, 0])), placed: {}, built: {}, everMarked: 0 };
     this.pathfinding = new PathfindingSystem(this.world);
     this.storage = new StorageManager(this);
     this.resources = new ResourceManager(this);
@@ -33,12 +34,16 @@ export class Simulation {
     this.jobs = new JobManager(this);
     this.ai = new AIManager(this);
     this.population = new PopulationManager(this);
+    this.farming = new FarmingManager(this);
     this.pathBudget = 0;
     for (const n of gen.nodes) this._addNode(n);
     this._found(gen.start);
     this.world.recomputeComps();
   }
   newId() { return this.nextId++; }
+  // Referências mantidas para os módulos de versões futuras.
+  static get HUNGRY() { return HUNGRY; }
+  static get PROFESSIONS() { return PROFESSIONS; }
   _addNode(n) {
     const node = { id: this.newId(), type: n.type, x: n.x, y: n.y, variant: n.variant, marked: false, work: 0, reservedBy: null, cooldown: 0 };
     this.nodes.set(node.id, node);
@@ -48,12 +53,16 @@ export class Simulation {
     return node;
   }
   _found(s) {
-    const d = this.construction._create('depot', s.x - 1, s.y - 1, 0);
-    d.done = true; d.stock = {}; d.reserved = {}; d.incoming = 0;
     const start = DIFFICULTY[this.config.difficulty].start;
-    for (const r of RES) { d.stock[r] = start[r]; d.reserved[r] = 0; }
-    this.startStock = { ...start };
-    this.population.spawnFounders(s.x, s.y + 3);
+    const stock = (b, list) => {
+      b.done = true;
+      this.storage.newStock(b);
+      for (const r of list) b.stock[r] = start[r] || 0;
+    };
+    stock(this.construction._create('depot', s.x - 1, s.y - 1, 0), ['wood', 'stone', 'iron']);
+    stock(this.construction._create('barn', s.x + 4, s.y - 1, 0), FOODS);
+    this.startStock = Object.fromEntries(RES.map(r => [r, start[r] || 0]));
+    this.population.spawnFounders(s.x, s.y + 4);
   }
   building(id) { return this.buildings.find(b => b.id === id); }
   citizen(id) { return this.citizens.find(c => c.id === id); }
@@ -91,8 +100,15 @@ export class Simulation {
     this.pathBudget = 8;
     if (this.world.compDirty) this.world.recomputeComps();
     for (const c of this.citizens) this.ai.update(c);
-    if (this.steps % 20 === 0) this._alerts();
+    if (this.steps % 20 === 0) { this.farming.tick(); this._alerts(); }
   }
+  foodTotal() {
+    let n = 0;
+    for (const r of FOODS) n += this.storage.total(r);
+    for (const b of this.buildings) if (b.pantry) n += this.population.pantryTotal(b);
+    return n;
+  }
+  foodDays() { return this.citizens.length ? this.foodTotal() / (this.citizens.length * 0.9) : 0; }
   _alerts() {
     const out = [];
     const sites = this.buildings.filter(b => !b.done);
@@ -105,6 +121,19 @@ export class Simulation {
     const cap = this.storage.capacity();
     if (cap === 0) out.push({ id: 'no-depot', level: 'bad', text: 'A vila não tem depósito. Os materiais ficam no chão.' });
     else if (this.storage.usedTotal() >= cap * 0.95) out.push({ id: 'full', level: 'warn', text: 'Os depósitos estão quase cheios. Construa outro.' });
+    const capF = this.storage.capacity('food');
+    if (capF === 0) out.push({ id: 'no-barn', level: 'bad', text: 'A vila não tem celeiro. Colheitas ficam no chão.' });
+    else if (this.storage.usedTotal('food') >= capF * 0.95) out.push({ id: 'full-food', level: 'warn', text: 'Os celeiros estão quase cheios. Construa outro.' });
+    const days = this.foodDays();
+    const hungry = this.citizens.filter(c => c.hunger >= 85).length;
+    if (hungry) out.push({ id: 'hungry', level: 'bad', text: `${hungry} aldeões passam fome e andam mais devagar. Falta comida ou caminho até o celeiro.` });
+    else if (days < 4) out.push({ id: 'low-food', level: 'warn', text: `Comida para cerca de ${Math.floor(days)} dias. Crie fazendas ou uma cabana de coleta.` });
+    if (sites.some(b => this.construction.materialsComplete(b)) && this.population.count('builder') === 0) out.push({ id: 'no-builder', level: 'bad', text: 'Há obra parada: a vila não tem construtores. Abra Gestão e defina alguns.' });
+    const vac = this.farming.vacancies();
+    if (vac.farm > 0) out.push({ id: 'vac-farm', level: 'warn', text: `Faltam ${vac.farm} agricultores nas fazendas. Abra Gestão.` });
+    if (vac.gather > 0) out.push({ id: 'vac-gather', level: 'warn', text: `Faltam ${vac.gather} coletores nas cabanas. Abra Gestão.` });
+    const spare = this.citizens.filter(c => (c.profession === 'farmer' || c.profession === 'gatherer') && c.workplace == null).length;
+    if (spare) out.push({ id: 'spare', level: 'info', text: `${spare} profissionais sem local de trabalho estão ajudando em outros serviços.` });
     const hl = this.population.homeless();
     if (hl > 0 && this.isNight()) out.push({ id: 'homeless', level: 'warn', text: `${hl} aldeões dormem ao relento. Construa casas.` });
     const idle = this.citizens.filter(c => c.task && c.task.kind === 'idle').length;

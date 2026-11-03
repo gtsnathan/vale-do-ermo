@@ -65,6 +65,7 @@ const tileXY = (page, x, y) => page.evaluate(([x, y]) => {
   // Ordena a casa pelo menu e clique.
   await page.evaluate(({ spot }) => __ermo.scene.camMgr.centerTile(spot[0], spot[1]), info);
   await page.waitForTimeout(200);
+  await page.click('#t-build');
   await page.click('#t-house');
   const h = await tileXY(page, info.spot[0] + 1, info.spot[1] + 1);
   await page.mouse.move(h[0] - 2, h[1]); await page.mouse.move(h[0], h[1]);
@@ -76,9 +77,9 @@ const tileXY = (page, x, y) => page.evaluate(([x, y]) => {
   console.log('casas:', JSON.stringify(house));
   if (house.length !== 1) throw new Error('clique não criou a casa');
 
+  const wait = (fn, label, ms = 150000) => page.waitForFunction(fn, null, { timeout: ms }).then(() => console.log('✓', label));
   // Acelera em 5× e acompanha o estado real em cada fase.
   await page.click('.sp[data-s="5"]');
-  const wait = (fn, label, ms = 150000) => page.waitForFunction(fn, null, { timeout: ms }).then(() => console.log('✓', label));
   await wait(() => { const b = __ermo.sim.buildings.find(b => b.type === 'house'); return b.delivered.wood >= 4; }, 'madeira chegando ao canteiro');
   await page.click('.sp[data-s="1"]'); await page.waitForTimeout(600);
   await page.screenshot({ path: `${OUT}/5-delivery.png` });
@@ -100,6 +101,42 @@ const tileXY = (page, x, y) => page.evaluate(([x, y]) => {
   await page.evaluate(() => { const b = __ermo.sim.buildings.find(b => b.type === 'house'); __ermo.scene.camMgr.centerTile(b.x + 1, b.y + 1); __ermo.scene.cameras.main.setZoom(2); });
   await page.waitForTimeout(600);
   await page.screenshot({ path: `${OUT}/8-night.png` });
+  // v0.2: fazenda por arrasto, profissão pelo painel, colheita até o celeiro.
+  const farmSpot = await page.evaluate(() => { const s = __ermo.sim, st = s.world.start; for (let r = 4; r < 40; r++) for (let y = st.y - r; y <= st.y + r; y++) for (let x = st.x - r; x <= st.x + r; x++) if (s.farming.validate(x, y, x + 4, y + 4).ok) return [x, y]; });
+  await page.evaluate(([x, y]) => { const S = __ermo.scene; S.cameras.main.setZoom(1.5); S.camMgr.centerTile(x + 2, y + 2); }, farmSpot);
+  await page.waitForTimeout(300);
+  await page.click('#t-build'); await page.click('#t-farm');
+  const fa = await tileXY(page, farmSpot[0] + 0.5, farmSpot[1] + 0.5), fb = await tileXY(page, farmSpot[0] + 4.5, farmSpot[1] + 4.5);
+  await page.mouse.move(fa[0], fa[1]); await page.mouse.down(); await page.mouse.move(fb[0], fb[1], { steps: 5 });
+  await page.waitForTimeout(100);
+  await page.screenshot({ path: `${OUT}/a-farm-drag.png` });
+  await page.mouse.up();
+  if (await page.evaluate(() => __ermo.sim.farms.length) !== 1) throw new Error('arrasto não criou fazenda');
+  console.log('✓ fazenda criada por arrasto');
+  await page.click('.crop[data-crop="beans"]');
+  await page.click('#t-manage');
+  await page.waitForSelector('[data-prof="farmer"][data-d="1"]');
+  await page.click('[data-prof="farmer"][data-d="1"]');
+  await page.waitForTimeout(100);
+  await page.click('[data-prof="farmer"][data-d="1"]');
+  if (await page.evaluate(() => __ermo.sim.population.count('farmer')) !== 2) throw new Error('botão de profissão falhou');
+  console.log('✓ 2 agricultores pelo painel');
+  await page.click('.sp[data-s="5"]');
+  await wait(() => __ermo.sim.farms[0].tiles.some(t => t.st === 2), 'terra preparada e plantada', 200000);
+  await page.waitForFunction(() => !__ermo.sim.isNight(), null, { timeout: 120000 });
+  await page.waitForFunction(() => __ermo.sim.farms[0].tiles.filter(t => t.st === 2).length >= 10, null, { timeout: 200000 });
+  await page.click('.sp[data-s="1"]'); await page.waitForTimeout(500);
+  await page.screenshot({ path: `${OUT}/b-farm-growing.png` });
+  await page.click('.sp[data-s="5"]');
+  await wait(() => __ermo.sim.farms[0].tiles.some(t => t.st === 3), 'plantas maduras', 300000);
+  await page.click('.sp[data-s="1"]'); await page.waitForTimeout(500);
+  await page.screenshot({ path: `${OUT}/c-farm-ripe.png` });
+  await page.click('.sp[data-s="5"]');
+  await wait(() => { const b = __ermo.sim.storage.barns()[0]; return b.stock.beans > 40 || __ermo.sim.stats.produced.beans >= 8; }, 'feijão colhido', 300000);
+  await page.click('.sp[data-s="1"]');
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: `${OUT}/d-manage.png` });
+  await page.click('#manage .px');
   // Clique no aldeão/edifício abre painel.
   await page.evaluate(() => { const b = __ermo.sim.buildings.find(b => b.type === 'house'); __ermo.scene.selected = { type: 'building', id: b.id }; });
   await page.click('#t-people');
@@ -129,6 +166,9 @@ const tileXY = (page, x, y) => page.evaluate(([x, y]) => {
   await m.page.tap('#m-new');
   await m.page.waitForTimeout(800);
   await m.page.screenshot({ path: `${OUT}/m2-game.png` });
+  await m.page.tap('#t-build');
+  await m.page.waitForTimeout(100);
+  await m.page.screenshot({ path: `${OUT}/m2b-drawer.png` });
   await m.page.tap('#t-house');
   const spot = await m.page.evaluate(() => {
     const s = __ermo.sim, st = s.world.start;
@@ -140,7 +180,8 @@ const tileXY = (page, x, y) => page.evaluate(([x, y]) => {
   await m.page.touchscreen.tap(t[0], t[1]);
   await m.page.waitForTimeout(300);
   await m.page.screenshot({ path: `${OUT}/m3-place.png` });
-  await m.page.tap('#b-rot');
+  for (let i = 0; i < 4; i++) await m.page.tap('#b-rot');
+  await m.page.waitForTimeout(200);
   await m.page.tap('#b-ok');
   await m.page.waitForTimeout(300);
   const mh = await m.page.evaluate(() => __ermo.sim.buildings.filter(b => b.type === 'house').length);

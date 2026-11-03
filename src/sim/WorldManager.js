@@ -11,6 +11,8 @@ export class WorldManager {
     this.doorAt = new Uint8Array(n);
     this.comp = new Int32Array(n).fill(-1);
     this.nodeBlocks = new Uint8Array(n);
+    this.fieldAt = new Int32Array(n).fill(-1);
+    this.forageUntil = new Float32Array(n);
     this.compDirty = true;
   }
   idx(x, y) { return y * this.w + x; }
@@ -78,6 +80,7 @@ export class WorldManager {
       if (this.buildingAt[k] !== -1) return { ok: false, reason: 'Já existe uma construção aqui' };
       if (this.nodeAt[k] !== -1) return { ok: false, reason: 'Limpe árvores e rochas deste terreno primeiro' };
       if (this.pileAt[k] !== -1) return { ok: false, reason: 'Há materiais no chão aqui' };
+      if (this.fieldAt[k] !== -1) return { ok: false, reason: 'Há uma fazenda aqui' };
       if (this.doorAt[k]) return { ok: false, reason: 'Isto bloquearia a entrada de outra construção' };
     }
     const d = this.doorTile(type, x, y, rot);
