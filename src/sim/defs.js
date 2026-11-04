@@ -40,6 +40,8 @@ export const FORAGE_RADIUS = 14;
 export const PROFESSIONS = { laborer: 'Trabalhador geral', builder: 'Construtor', farmer: 'Agricultor', gatherer: 'Coletor',
   woodcutter: 'Lenhador', forester: 'Silvicultor', fisher: 'Pescador', hunter: 'Caçador', herder: 'Pastor', herbalist: 'Herbalista',
   miner: 'Mineiro', smith: 'Ferreiro', tailor: 'Alfaiate', teacher: 'Professor', doctor: 'Médico', vendor: 'Vendedor', trader: 'Comerciante' };
+export const PROF_PLURAL = { farmer: 'agricultores', gatherer: 'coletores', woodcutter: 'lenhadores', forester: 'silvicultores', fisher: 'pescadores', hunter: 'caçadores', herder: 'pastores', herbalist: 'herbalistas',
+  miner: 'mineiros', smith: 'ferreiros', tailor: 'alfaiates', teacher: 'professores', doctor: 'médicos', vendor: 'vendedores', trader: 'comerciantes' };
 export const PROF_NOTE = { laborer: 'Corta, minera e faz todo o transporte', builder: 'Só eles erguem obras', farmer: 'Fazendas e pomares', gatherer: 'Cabana de coleta',
   woodcutter: 'Só corta lenha, não carrega', forester: 'Planta e corta árvores', fisher: 'Cabana de pesca', hunter: 'Carne e couro', herder: 'Lã e carne da pastagem', herbalist: 'Colhe ervas',
   miner: 'Pedreira e mina', smith: 'Faz ferramentas', tailor: 'Faz roupas', teacher: 'Dá aula na escola', doctor: 'Trata doentes', vendor: 'Abastece o mercado', trader: 'Leva mercadoria ao posto' };
@@ -54,7 +56,7 @@ export const YEAR_DAYS = 6;                 // um ano tem 6 dias de jogo
 export const YEAR = DAY * YEAR_DAYS;
 export const ADULT_AGE = 12;                // criança não trabalha; a partir daqui, sim
 export const MARRY_AGE = 16;
-export const GROW_SPEED = 6;                // até os 16 anos, a idade passa 6 vezes mais rápido
+export const GROW_SPEED = 24;               // até os 16 anos, a idade passa 24 vezes mais rápido
 export const FERTILE_MAX = 45;
 export const PREGNANCY = DAY * 3;
 export const BIRTH_REST = DAY * 3;
@@ -68,7 +70,7 @@ export const TECH = {
   farm: ['Enxada', 'Arado de ferro', 'Rotação de culturas'], orchard: ['Árvores novas', 'Poda', 'Enxertia'], pasture: ['Cerca simples', 'Tosquia', 'Seleção do rebanho'],
   woodcutter: ['Machado', 'Serra de dois homens', 'Serra hidráulica'], forester: ['Mudas', 'Viveiro', 'Manejo da mata'], fisher: ['Linha', 'Redes', 'Barco de pesca'], hunter: ['Lanças', 'Arcos', 'Armadilhas'],
   gatherer: ['Cestos', 'Trilhas de coleta', 'Conhecimento da mata'], herbalist: ['Colheita', 'Secagem', 'Herbário'], smith: ['Forja', 'Fole', 'Martelo hidráulico'], tailor: ['Agulha', 'Tear', 'Tear de pedal'],
-  quarry: ['Picaretas', 'Guindaste', 'Pólvora de pedreira'], mine: ['Picaretas', 'Escoras', 'Bomba de água'], school: ['Lousa', 'Livros', 'Biblioteca'], hospital: ['Ervas', 'Enfermaria', 'Medicina'],
+  quarry: ['Picaretas', 'Guindaste', 'Cunhas de ferro'], mine: ['Picaretas', 'Escoras', 'Bomba de água'], school: ['Lousa', 'Livros', 'Biblioteca'], hospital: ['Ervas', 'Enfermaria', 'Medicina'],
   townhall: ['Registros', 'Censo', 'Administração'], chapel: ['Capela', 'Igreja', 'Sino novo'], cemetery: ['Cerca', 'Ampliado', 'Jazigos'], well: ['Balde', 'Roldana', 'Bomba manual'], trading: ['Trapiche', 'Cais', 'Porto'],
 };
 export const TRAIL_WEAR = 30, ROAD_WEAR = 130;  // passos para virar trilha e depois estrada
@@ -92,7 +94,7 @@ export const BUILDINGS = {
   fisher: { name: 'Cabana de pesca', w: 2, h: 2, cost: { wood: 12 }, work: 18, builders: 2, workers: 2, prof: 'fisher', needs: 'water', cat: 'Alimento',
     recipe: { in: {}, out: 'fish', n: 3, t: 16 }, about: 'Pesca o ano todo. Precisa ficar à beira da água.' },
   hunter: { name: 'Cabana de caça', w: 2, h: 2, cost: { wood: 12 }, work: 18, builders: 2, workers: 2, prof: 'hunter', cat: 'Alimento',
-    about: 'Caça veados selvagens. Dá carne e couro. Caça demais esgota os animais.' },
+    about: 'Caça veados selvagens. Cada animal rende carne e couro. O couro vira roupa no alfaiate. Caça demais esgota os animais.' },
   woodcutter: { name: 'Cortador de lenha', w: 2, h: 2, cost: { wood: 12 }, work: 18, builders: 2, workers: 1, prof: 'woodcutter', cat: 'Indústria',
     recipe: { in: { wood: 1 }, out: 'firewood', n: 4, t: 10 }, about: 'Transforma 1 madeira em 4 de lenha. Sem lenha, as casas ficam frias.' },
   forester: { name: 'Posto de silvicultura', w: 2, h: 2, cost: { wood: 14 }, work: 20, builders: 2, workers: 2, prof: 'forester', cat: 'Indústria',
@@ -100,9 +102,9 @@ export const BUILDINGS = {
   herbalist: { name: 'Herbalista', w: 2, h: 2, cost: { wood: 10 }, work: 16, builders: 2, workers: 1, prof: 'herbalist', cat: 'Serviços',
     about: 'Colhe ervas nas matas. O hospital usa ervas para curar doentes.' },
   smith: { name: 'Ferreiro', w: 2, h: 2, cost: { wood: 20, stone: 10 }, work: 30, builders: 3, workers: 1, prof: 'smith', cat: 'Indústria',
-    recipe: { in: { iron: 1, wood: 1 }, out: 'tools', n: 1, t: 28 }, about: 'Faz ferramentas com ferro e madeira. Sem ferramenta o trabalho rende menos.' },
+    recipe: { in: { iron: 1, wood: 1 }, out: 'tools', n: 1, t: 28 }, about: 'Faz ferramentas com ferro e madeira. Quem está sem ferramenta rende menos. O ferro vem da mina ou de veios marcados.' },
   tailor: { name: 'Alfaiate', w: 2, h: 2, cost: { wood: 16, stone: 4 }, work: 26, builders: 3, workers: 1, prof: 'tailor', cat: 'Indústria',
-    recipe: { in: { hide: 2 }, out: 'coat', n: 1, t: 26 }, about: 'Faz roupas de inverno com couro e lã. Quem veste sente menos frio.' },
+    recipe: { in: { hide: 2 }, out: 'coat', n: 1, t: 26 }, about: 'Faz roupas de inverno com couro da caça ou lã da pastagem. Quem veste sente menos frio.' },
   quarry: { name: 'Pedreira', w: 3, h: 3, cost: { wood: 16 }, work: 24, builders: 3, workers: 4, prof: 'miner', needs: 'mountain', risky: true, cat: 'Indústria',
     recipe: { in: {}, out: 'stone', n: 3, t: 20 }, about: 'Tira pedra sem parar. Precisa encostar na montanha. O trabalho tem risco.' },
   mine: { name: 'Mina', w: 3, h: 3, cost: { wood: 24, stone: 8 }, work: 30, builders: 3, workers: 4, prof: 'miner', needs: 'mountain', risky: true, cat: 'Indústria',

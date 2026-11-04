@@ -1084,7 +1084,7 @@ test('casa vazia atrai migrantes se houver comida; sem isso, ninguém vem', () =
   assert.equal(hungry.citizens.length, 10, 'veio para vila sem comida');
 });
 
-test('um bebê vira trabalhador em até 12 dias de jogo', () => {
+test('um bebê vira trabalhador em até 3 dias de jogo', () => {
   const s = new Simulation({ seed: 'rapido', difficulty: 'facil' });
   housed(s, 1);
   const w = s.citizens.find(c => c.home != null && c.sex === 'F');
@@ -1092,8 +1092,61 @@ test('um bebê vira trabalhador em até 12 dias de jogo', () => {
   run(s, 3, 40);
   const k = s.citizens.find(c => c.parents.includes(w.id));
   assert.equal(k.profession, 'child');
-  for (let i = 0; i < 11; i++) { stockUp(s); fed(s); run(s, DAY, 400); assert.equal(k.profession, 'child', `cresceu cedo no dia ${i}`); }
+  for (let i = 0; i < 2; i++) { stockUp(s); fed(s); run(s, DAY, 400); assert.equal(k.profession, 'child', `cresceu cedo no dia ${i}`); }
   stockUp(s); fed(s); run(s, DAY + 10, 400);
   assert.equal(k.profession, 'laborer');
   assert.ok(s.population.count('laborer') > 8);
+});
+
+const ready = (s, t, x, y) => {
+  const b = s.construction.place(t, x, y, 0).building;
+  for (const q in BUILDINGS[t].cost) { b.delivered[q] = BUILDINGS[t].cost[q]; s.startStock[q] += BUILDINGS[t].cost[q]; }
+  s.construction.finish(b);
+  return b;
+};
+test('cadeia da roupa: caçador abate, couro vai ao alfaiate, roupa chega a quem precisa', () => {
+  const s = new Simulation({ seed: 'couro', difficulty: 'normal' });
+  const d = s.storage.depots()[0];
+  s.startStock.coat -= d.stock.coat; d.stock.coat = 0;
+  const [hx, hy] = freeSpot(s, 'hunter'); ready(s, 'hunter', hx, hy);
+  const [tx, ty] = freeSpot(s, 'tailor'); const tailor = ready(s, 'tailor', tx, ty);
+  s.population.changeCount('hunter', 2);
+  s.population.changeCount('tailor', 1);
+  s.farming.balance();
+  assert.ok(s.chronicle.length === 0);
+  run(s, 10, 100);
+  assert.ok(s.alerts.some(a => a.id === 'lack-tailor'), 'não avisou falta de couro');
+  const victim = s.citizens.find(c => c.profession === 'laborer');
+  let tries = 0;
+  while (s.stats.produced.coat === 0 && tries++ < 60) { stockUp(s); fed(s); for (const c of s.citizens) { c.warmth = 100; c.health = 100; } run(s, 20, 400); }
+  assert.ok(s.stats.produced.hide > 0, 'caça não deu couro');
+  assert.ok(s.stats.produced.meat > 0, 'caça não deu carne');
+  assert.ok(s.stats.produced.coat > 0, 'alfaiate não costurou');
+  assert.ok(tailor.input.hide !== undefined);
+  for (let i = 0; i < 40 && s.storage.total('coat') === 0; i++) { stockUp(s); fed(s); run(s, 10, 400); }
+  assert.ok(s.storage.total('coat') > 0, 'roupa não chegou ao depósito');
+  s.time = 240 * 3.2; s.season.last = s.season.index();
+  victim.coatLife = 0;
+  const had = s.stats.consumed.coat;
+  for (let i = 0; i < 40 && victim.coatLife <= 0; i++) { stockUp(s); fed(s); run(s, 5, 400); }
+  assert.ok(victim.coatLife > 0, 'aldeão não pegou a roupa');
+  assert.ok(s.stats.consumed.coat > had);
+});
+test('cadeia da ferramenta: ferro e madeira viram ferramenta, e quem está sem pega uma', () => {
+  const s = new Simulation({ seed: 'forja', difficulty: 'normal' });
+  const d = s.storage.depots()[0];
+  s.startStock.tools -= d.stock.tools; d.stock.tools = 0;
+  const [x, y] = freeSpot(s, 'smith'); ready(s, 'smith', x, y);
+  s.population.changeCount('smith', 1);
+  s.farming.balance();
+  run(s, 10, 100);
+  assert.ok(s.alerts.some(a => a.id === 'lack-smith'), 'não avisou falta de ferro');
+  d.stock.iron += 5; s.startStock.iron += 5;
+  const worker = s.citizens.find(c => c.profession === 'laborer');
+  worker.toolLife = 0;
+  const rate0 = s.population.rate(worker);
+  for (let i = 0; i < 40 && worker.toolLife <= 0; i++) { stockUp(s); fed(s); run(s, 10, 400); }
+  assert.ok(s.stats.produced.tools > 0, 'ferreiro não fez ferramentas');
+  assert.ok(worker.toolLife > 0, 'aldeão não pegou a ferramenta');
+  assert.ok(s.population.rate(worker) > rate0, 'ferramenta não melhorou o trabalho');
 });

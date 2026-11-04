@@ -3,6 +3,7 @@ import { ADULT_AGE, GROW_SPEED, YEAR_DAYS, BUILDINGS, CROPS, DAY, DIFFICULTY, FA
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s).replace(/[&<>"]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
+const ri = r => `<img class="ri" src="${iconDataURL(r, document)}" alt="">`;
 const icon = n => `<img class="ic" src="${iconDataURL(n, document)}" alt="">`;
 
 // Interface em DOM sobre o canvas. Painéis arrastam, fecham e não pausam o jogo.
@@ -70,10 +71,10 @@ export class UIManager {
       if (id === 'people') this.togglePanel('people');
     });
     const costOf = t => Object.entries(BUILDINGS[t].cost).map(([r, n]) => `${n} ${RES_LABEL[r].toLowerCase()}`).join(', ');
-    const ICON = { house: 'house', stonehouse: 'house', depot: 'depot', barn: 'barn', market: 'depot', gatherer: 'gatherer', fisher: 'food', hunter: 'food', woodcutter: 'firewood', forester: 'axe', smith: 'pick', tailor: 'people', quarry: 'pick', mine: 'pick', school: 'manage', hospital: 'manage', townhall: 'manage', chapel: 'manage', trading: 'depot', cemetery: 'manage', well: 'erase', herbalist: 'gatherer' };
+    const ICON = { house: 'house', stonehouse: 'house', depot: 'depot', barn: 'barn', market: 'depot', gatherer: 'gatherer', fisher: 'fish', hunter: 'meat', woodcutter: 'firewood', forester: 'axe', smith: 'tools', tailor: 'coat', quarry: 'pick', mine: 'pick', school: 'manage', hospital: 'manage', townhall: 'manage', chapel: 'manage', trading: 'depot', cemetery: 'manage', well: 'erase', herbalist: 'herbs' };
     const cats = ['Moradia', 'Armazém', 'Alimento', 'Indústria', 'Serviços'];
     const btn = (ic, id, label, cost) => `<button class="dr" id="t-${id}">${icon(ic)}<span><b>${label}</b><em>${cost}</em></span></button>`;
-    const extra = { Alimento: [['farm', 'farm', 'Fazenda', 'Só trabalho'], ['farm', 'orchard', 'Pomar', 'Só trabalho'], ['people', 'pasture', 'Pastagem', 'Só trabalho']] };
+    const extra = { Alimento: [['farm', 'farm', 'Fazenda', 'Sem custo de material'], ['farm', 'orchard', 'Pomar', 'Sem custo de material'], ['people', 'pasture', 'Pastagem', 'Sem custo de material']] };
     let html = '';
     for (const cat of cats) {
       html += `<h4>${cat}</h4><div class="dg">`;
@@ -81,7 +82,7 @@ export class UIManager {
       for (const e of extra[cat] || []) html += btn(...e);
       html += '</div>';
     }
-    html += `<h4>Caminhos</h4><div class="dg">${btn('road', 'road1', 'Estrada de terra', 'Mais rápida')}${btn('road', 'road2', 'Estrada de pedra', '1 pedra por tile')}${btn('road', 'road3', 'Ponte', '1 madeira por tile')}${btn('road', 'road4', 'Túnel', '1 pedra por tile')}</div>`;
+    html += `<h4>Caminhos</h4><div class="dg">${btn('road', 'road1', 'Estrada de terra', 'Mais rápida')}${btn('road', 'road2', 'Estrada de pedra', '1 pedra por trecho')}${btn('road', 'road3', 'Ponte', '1 madeira por trecho')}${btn('road', 'road4', 'Túnel', '1 pedra por trecho')}</div>`;
     $('#drawer').innerHTML = html;
     $('#drawer').addEventListener('click', e => {
       const b = e.target.closest('button'); if (!b) return;
@@ -111,7 +112,7 @@ export class UIManager {
     } else if (t.kind === 'place') {
       const def = BUILDINGS[t.type];
       const cost = Object.entries(def.cost).map(([r, n]) => `${n} ${RES_LABEL[r].toLowerCase()}`).join(', ');
-      $('#h-text').textContent = `${def.name}: ${cost}. Quadrado claro é a entrada.`;
+      $('#h-text').textContent = `${def.name}: ${cost}. O quadrado claro marca a entrada.`;
       $('#b-rot').hidden = false; $('#b-ok').hidden = false;
     }
   }
@@ -333,13 +334,13 @@ export class UIManager {
         const used = sim.storage.used(b), cap = sim.storage.cap(b);
         const shown = RES.filter(r => b.stock[r] > 0);
         body = `<div class="bar"><label>Ocupação <em>${used}/${cap}</em></label><div><i style="width:${(used / cap) * 100}%"></i></div></div>` +
-          (shown.length ? shown.map(r => row(RES_LABEL[r], b.stock[r])).join('') : '<p class="note">Vazio.</p>');
+          (shown.length ? shown.map(r => row(`${ri(r)}${RES_LABEL[r]}`, b.stock[r])).join('') : '<p class="note">Vazio.</p>');
         if (def.prof) body += this._staffRows(sim, b, def, person);
         if (b.type === 'trading') {
           const boat = sim.trade.boat;
-          body += `<h5>Levar ao posto</h5><div class="crops">${['wood', 'firewood', 'stone', 'iron', 'tools', 'coat', 'potato', 'hide', 'fish'].map(r => `<button class="crop ${b.exportRes === r ? 'on' : ''}" data-act="exp" data-r="${r}">${RES_LABEL[r]}</button>`).join('')}</div>` +
+          body += `<h5>Levar ao posto</h5><div class="crops">${['wood', 'firewood', 'stone', 'iron', 'tools', 'coat', 'potato', 'hide', 'fish'].map(r => `<button class="crop ${b.exportRes === r ? 'on' : ''}" data-act="exp" data-r="${r}">${ri(r)}${RES_LABEL[r]}</button>`).join('')}</div>` +
             row('Valor no posto', sim.work.postValue(b)) +
-            (boat ? `<h5>Barco no porto</h5>${boat.offers.map(o => `<div class="row"><span>${RES_LABEL[o.res]} · resta ${o.qty}</span><button class="btn" data-act="buy" data-r="${o.res}">Comprar 5 (${VALUE[o.res] * 5})</button></div>`).join('')}` : '<p class="note">Nenhum barco no momento.</p>');
+            (boat ? `<h5>Barco no porto</h5>${boat.offers.map(o => `<div class="row"><span>${ri(o.res)}${RES_LABEL[o.res]} · resta ${o.qty}</span><button class="btn" data-act="buy" data-r="${o.res}">Comprar 5 (${VALUE[o.res] * 5})</button></div>`).join('')}` : '<p class="note">Nenhum barco no momento.</p>');
         }
       } else if (!def.residents) {
         body = def.prof ? this._staffRows(sim, b, def, person) : '';
@@ -348,8 +349,8 @@ export class UIManager {
           body += row('Mata em volta', trees > 60 ? 'Farta' : trees > 15 ? 'Razoável' : trees > 0 ? 'Pouca' : 'Nenhuma');
         }
         if (def.recipe) {
-          const R = def.recipe, inp = Object.keys(R.in).map(r => `${R.in[r]} ${RES_LABEL[r].toLowerCase()}`).join(' + ') || 'nada';
-          body += row('Receita', `${inp} → ${R.n} ${RES_LABEL[R.out].toLowerCase()}`) + Object.keys(R.in).map(r => row(`Na oficina: ${RES_LABEL[r]}`, b.input?.[r] || 0)).join('');
+          const R = def.recipe, inp = Object.keys(R.in).map(r => `${R.in[r]} ${ri(r)}${RES_LABEL[r].toLowerCase()}`).join(' + ') || 'Sem matéria-prima';
+          body += `<div class="recipe">${inp} → ${R.n} ${ri(R.out)}${({ tools: 'ferramenta', coat: 'roupa de inverno' })[R.out] || RES_LABEL[R.out].toLowerCase()}</div>` + Object.keys(R.in).map(r => row(`${ri(r)}Na oficina`, b.input?.[r] || 0)).join('');
         }
         if (b.type === 'school') body += row('Alunos', sim.citizens.filter(c => c.profession === 'student').length);
         if (b.type === 'hospital') body += row('Ervas', b.input?.herbs || 0) + row('Doentes', sim.citizens.filter(c => c.sick > 0).length);
@@ -370,12 +371,12 @@ export class UIManager {
       const cnt = [0, 0, 0, 0]; for (const t of f.tiles) cnt[t.st]++;
       const staff = sim.citizens.filter(c => c.workplace === f.id);
       const fert = Math.round(sim.farming.fertility(f) * 100);
-      body = `<div class="crops">${(f.kind === 'pasture' ? [] : f.kind === 'orchard' ? ORCHARD_CROPS : FIELD_CROPS).map(k => `<button class="crop ${f.crop === k ? 'on' : ''}" data-act="crop" data-crop="${k}">${RES_LABEL[k]}</button>`).join('')}</div>` +
+      body = `<div class="crops">${(f.kind === 'pasture' ? [] : f.kind === 'orchard' ? ORCHARD_CROPS : FIELD_CROPS).map(k => `<button class="crop ${f.crop === k ? 'on' : ''}" data-act="crop" data-crop="${k}">${ri(k)}${RES_LABEL[k]}</button>`).join('')}</div>` +
         (f.kind === 'pasture' ? row('Rebanho', `${f.herd} ovelhas`) + row('Lã pronta', Math.floor(f.wool)) :
-        `<p class="note">${RES_LABEL[f.crop]}: colhe em ${String(CROPS[f.crop].grow / DAY).replace('.', ',')} dias, rende ${CROPS[f.crop].yield} por tile. Parado no inverno.</p>` +
-        row('Solo fértil', `${fert}%`) + row('Sem preparo', cnt[0]) + row('Prontos para plantar', cnt[1]) + row('Crescendo', cnt[2]) + row('Prontos para colher', cnt[3])) +
+        `<p class="note">${RES_LABEL[f.crop]}: colhe em ${String(CROPS[f.crop].grow / DAY).replace('.', ',')} dias, rende ${CROPS[f.crop].yield} por canteiro. Não cresce no inverno.</p>` +
+        row('Solo fértil', `${fert}%`) + row('Terra por preparar', cnt[0]) + row('Prontos para o plantio', cnt[1]) + row('Crescendo', cnt[2]) + row('Prontos para a colheita', cnt[3])) +
         `<div class="row"><span>Agricultores</span><b class="step"><button data-act="wk" data-d="-1" aria-label="Menos vagas">−</button>${staff.length}/${f.maxWorkers}<button data-act="wk" data-d="1" aria-label="Mais vagas">+</button></b></div>` +
-        (staff.length < f.maxWorkers ? '<p class="note warn">Faltam agricultores. Abra Gestão para definir mais.</p>' : '') +
+        (staff.length < f.maxWorkers ? '<p class="note warn">Faltam agricultores. Defina em Gestão.</p>' : '') +
         this._upgrade(sim, f, row) +
         (f.confirm ? '<div class="acts"><button class="btn warn" data-act="farmdel">Confirmar remoção</button><button class="btn" data-act="farmkeep">Manter</button></div>' : '<div class="acts"><button class="btn" data-act="farmdel">Remover fazenda</button></div>');
     } else if (s.type === 'node') {
@@ -425,7 +426,7 @@ export class UIManager {
       const pantry = sim.buildings.reduce((a, b) => a + ((b.pantry && b.pantry[r]) || 0), 0);
       const ground = sim.resources.groundTotal(r), inStore = sim.storage.total(r);
       if (!inStore && !pantry && !ground) return '';
-      return `<tr><td>${RES_LABEL[r]}</td><td>${inStore}</td><td>${pantry || '–'}</td><td>${ground || '–'}</td></tr>`;
+      return `<tr><td>${ri(r)}${RES_LABEL[r]}</td><td>${inStore}</td><td>${pantry || '–'}</td><td>${ground || '–'}</td></tr>`;
     };
     const capM = `${sim.storage.usedTotal()}/${sim.storage.capacity()}`, capF = `${sim.storage.usedTotal('food')}/${sim.storage.capacity('food')}`;
     const days = sim.foodDays();
@@ -458,7 +459,7 @@ export class UIManager {
     const last = R[R.length - 1], base = R[Math.max(0, R.length - 7)];
     const rows = RES.map(r => {
       const p = last.p[r] - (base.p[r] || 0), c = last.c[r] - (base.c[r] || 0);
-      return p || c ? `<tr><td>${RES_LABEL[r]}</td><td>${p || '–'}</td><td>${c || '–'}</td></tr>` : '';
+      return p || c ? `<tr><td>${ri(r)}${RES_LABEL[r]}</td><td>${p || '–'}</td><td>${c || '–'}</td></tr>` : '';
     }).join('');
     const line = (key, col) => { const m = Math.max(10, ...R.map(x => x[key])); return `<polyline style="stroke:${col}" points="${R.map((x, i) => `${(i / (R.length - 1)) * 280},${44 - (x[key] / m) * 40}`).join(' ')}"/>`; };
     return `<h3>Relatórios</h3><svg class="spark" viewBox="0 0 280 46" role="img" aria-label="Estoque ao longo do tempo">${line('food', '#e2733a')}${line('wood', '#e0c078')}${line('firewood', '#8fb6c4')}</svg>

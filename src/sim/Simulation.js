@@ -1,5 +1,5 @@
 import { RNG, hashSeed } from './rng.js';
-import { MATERIALS, ADULT_AGE, BUILDINGS, DAY, DIFFICULTY, YEAR, YEAR_DAYS, FOODS, HUNGRY, MAP_SIZES, NIGHT_END, NIGHT_START, NODE, PROFESSIONS, RES, STEP } from './defs.js';
+import { PROF_PLURAL, MATERIALS, ADULT_AGE, BUILDINGS, DAY, DIFFICULTY, YEAR, YEAR_DAYS, FOODS, HUNGRY, MAP_SIZES, NIGHT_END, NIGHT_START, NODE, PROFESSIONS, RES, STEP } from './defs.js';
 import { generateTerrain } from './TerrainGenerator.js';
 import { WorldManager } from './WorldManager.js';
 import { PathfindingSystem } from './PathfindingSystem.js';
@@ -185,7 +185,7 @@ export class Simulation {
     else if (days < 4) out.push({ id: 'low-food', level: 'warn', text: `Comida para cerca de ${Math.floor(days)} dias. Crie fazendas ou uma cabana de coleta.` });
     if (sites.some(b => this.construction.materialsComplete(b)) && this.population.count('builder') === 0) out.push({ id: 'no-builder', level: 'bad', text: 'Há obra parada: a vila não tem construtores. Abra Gestão e defina alguns.' });
     const vac = this.farming.vacancies();
-    for (const p in vac) out.push({ id: `vac-${p}`, level: 'warn', text: `Faltam ${vac[p]} vagas de ${PROFESSIONS[p].toLowerCase()}. Abra Gestão.` });
+    for (const p in vac) out.push({ id: `vac-${p}`, level: 'warn', text: vac[p] === 1 ? `Falta 1 pessoa como ${PROFESSIONS[p].toLowerCase()}. Defina em Gestão.` : `Faltam ${vac[p]} ${PROF_PLURAL[p]}. Defina em Gestão.` });
     const spare = this.citizens.filter(c => !['laborer', 'builder', 'child', 'student'].includes(c.profession) && c.workplace == null).length;
     const season = this.season.index(), fw = this.storage.total('firewood');
     if (season >= 1 && fw < this.buildings.filter(b => b.pantry).length * 6) out.push({ id: 'firewood', level: season === 3 ? 'bad' : 'warn', text: 'Pouca lenha para o inverno. Construa um cortador de lenha.' });
@@ -197,7 +197,7 @@ export class Simulation {
     if (noTool) out.push({ id: 'tools', level: 'warn', text: `${noTool} aldeões sem ferramenta rendem menos. Construa mina e ferreiro.` });
     if (this.unburied > 0) out.push({ id: 'unburied', level: 'warn', text: `${this.unburied} mortos sem sepultura. Construa um cemitério.` });
     if (this.trade.boat) out.push({ id: 'boat', level: 'info', text: 'Há um barco mercante no posto comercial.' });
-    if (spare) out.push({ id: 'spare', level: 'info', text: `${spare} profissionais sem local de trabalho estão ajudando em outros serviços.` });
+    if (spare) out.push({ id: 'spare', level: 'info', text: `${spare} profissionais sem local de trabalho estão ajudando em outras tarefas.` });
     const hl = this.population.homeless();
     if (hl > 0 && this.isNight()) out.push({ id: 'homeless', level: 'warn', text: `${hl} aldeões dormem ao relento. Construa casas.` });
     const grown = this.citizens.filter(c => c.age >= ADULT_AGE);
@@ -207,6 +207,14 @@ export class Simulation {
     if (weak) out.push({ id: 'weak', level: 'bad', text: `${weak} aldeões estão muito fracos e podem morrer.` });
     const idle = grown.filter(c => c.task && c.task.kind === 'idle').length;
     if (grown.length && idle >= grown.length && !this.isNight()) out.push({ id: 'idle', level: 'info', text: 'Todos estão sem tarefa. Marque recursos ou ordene uma construção.' });
+    for (const b of this.buildings) {
+      const rec = BUILDINGS[b.type].recipe;
+      if (!b.done || !rec || !b.input || !this.farming.workers(b)) continue;
+      const lacking = Object.keys(rec.in).filter(r => (b.input[r] || 0) < rec.in[r] && this.storage.total(r) <= 0);
+      if (!lacking.length) continue;
+      const hint = { tailor: 'O alfaiate está sem couro. Construa uma cabana de caça ou uma pastagem.', smith: lacking.includes('iron') ? 'O ferreiro está sem ferro. Construa uma mina ou marque veios de ferro.' : 'O ferreiro está sem madeira. Marque árvores para corte.', woodcutter: 'O cortador de lenha está sem madeira. Marque árvores para corte.' }[b.type];
+      if (hint && !out.some(a => a.text === hint)) out.push({ id: `lack-${b.type}`, level: 'warn', text: hint });
+    }
     const waiting = this.piles.filter(p => p.amount > p.reserved).reduce((a, p) => a + p.amount - p.reserved, 0);
     if (waiting > 25) out.push({ id: 'haul', level: 'warn', text: `Há ${waiting} itens no chão esperando transporte. Faltam trabalhadores gerais.` });
     // Concordância quando o número é 1.

@@ -83,7 +83,7 @@ export class PopulationManager {
       if (cur && hasAdult(cur)) continue;
       const own = houses.find(h => room(h) && h.residents.some(id => k.parents.includes(id)));
       const host = own || houses.find(h => h !== cur && room(h) && hasAdult(h));
-      if (host) { this._enter(k, host); this.news('family', `${k.name} foi acolhido por outra família.`); }
+      if (host) { this._enter(k, host); this.news('family', `${k.name} passou a viver com outra família.`); }
     }
   }
   news(kind, text) {

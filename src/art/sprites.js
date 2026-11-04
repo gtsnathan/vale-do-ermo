@@ -182,6 +182,92 @@ export function mountainBlock(H, variant, level) {
   return p.trim();
 }
 
+/* ---------- Produtos: uma imagem própria para cada recurso ---------- */
+const ITEMS = ['firewood', 'tools', 'coat', 'hide', 'herbs', 'potato', 'wheat', 'corn', 'pumpkin', 'beans', 'cabbage', 'berries', 'mushroom', 'fish', 'meat', 'apple', 'pear'];
+function drawItem(p, res, x, y) {
+  const round = (rx, ry, cols) => p.ellipse(x, y, rx, ry, (u, v) => cols[u + v < -0.25 ? 0 : u + v < 0.55 ? 1 : 2]);
+  switch (res) {
+    case 'fish':
+      p.poly([[x + 4, y], [x + 9, y - 4], [x + 9, y + 4]], 0x5f7f92);
+      p.ellipse(x, y, 6.5, 3.2, (u, v) => (v < -0.2 ? 0x6f93a8 : v < 0.45 ? 0xa9c4cf : 0xdfe8ea));
+      p.set(x - 4, y - 1, 0x10181e); p.line(x - 2, y - 3, x - 2, y + 2, 0x4c6a7c);
+      p.poly([[x, y - 3], [x + 3, y - 6], [x + 3, y - 3]], 0x4c6a7c);
+      break;
+    case 'meat':
+      p.rect(x + 4, y - 1, 5, 2, 0xece3cf); p.ellipse(x + 9, y - 1, 1.6, 1.6, 0xfff7e6); p.ellipse(x + 9, y + 1, 1.6, 1.6, 0xfff7e6);
+      p.ellipse(x - 1, y, 6, 4.6, (u, v) => (u * u + v * v < 0.2 ? 0xd9707a : u + v < 0 ? 0xbd3f3f : 0x8f2c2e));
+      p.line(x - 5, y - 2, x - 3, y - 4, 0xf0c7b4);
+      break;
+    case 'hide':
+      p.poly([[x - 7, y - 4], [x - 3, y - 5], [x, y - 3], [x + 3, y - 5], [x + 7, y - 4], [x + 5, y], [x + 7, y + 4], [x + 2, y + 3], [x, y + 5], [x - 2, y + 3], [x - 7, y + 4], [x - 5, y]], (a, b) => (hash(a >> 1, b >> 1, 6) > 0.72 ? 0x7a5330 : hash(a, b, 7) > 0.5 ? 0xb5834f : 0xa47443));
+      break;
+    case 'tools':
+      p.line(x - 6, y + 5, x + 3, y - 3, 0x8a6240); p.line(x - 5, y + 5, x + 4, y - 3, 0x5e432c);
+      p.poly([[x + 1, y - 7], [x + 7, y - 2], [x + 5, y], [x - 1, y - 5]], 0x9fa5ab); p.line(x + 1, y - 7, x + 7, y - 2, 0xdfe3e6);
+      p.line(x + 6, y + 5, x - 3, y - 3, 0x8a6240);
+      p.poly([[x - 7, y - 2], [x - 3, y - 6], [x - 1, y - 4], [x - 5, y]], 0x6f757b);
+      break;
+    case 'coat':
+      p.poly([[x - 3, y - 6], [x + 3, y - 6], [x + 7, y - 3], [x + 6, y + 2], [x + 4, y], [x + 4, y + 6], [x - 4, y + 6], [x - 4, y], [x - 6, y + 2], [x - 7, y - 3]], (a, b) => (a < x - 1 ? 0x8e5d38 : a > x + 1 ? 0x6b4427 : 0x7c5030));
+      p.rect(x - 3, y - 7, 6, 2, 0xe8dfc8); p.line(x, y - 5, x, y + 6, 0x3c2616); p.set(x + 1, y - 2, 0xd9b872); p.set(x + 1, y + 2, 0xd9b872);
+      break;
+    case 'herbs':
+      for (const [a, b] of [[-3, -5], [0, -7], [3, -5], [-5, -2], [5, -2]]) { p.line(x, y + 2, x + a, y + b, 0x4d7a35); p.ellipse(x + a, y + b, 1.7, 1.2, 0x7fae50); }
+      p.rect(x - 2, y + 1, 4, 2, 0xc9a659); p.line(x - 1, y + 3, x - 2, y + 6, 0x4d7a35); p.line(x + 1, y + 3, x + 2, y + 6, 0x4d7a35);
+      break;
+    case 'firewood':
+      p.poly([[x - 7, y + 1], [x + 3, y - 4], [x + 6, y - 1], [x - 4, y + 4]], 0x8a6240); p.line(x - 7, y + 1, x + 3, y - 4, 0xb48a56); p.poly([[x + 3, y - 4], [x + 7, y - 3], [x + 6, y - 1]], 0xe0bb80);
+      p.poly([[x - 5, y - 3], [x + 6, y + 3], [x + 4, y + 6], [x - 7, y]], 0x75533a); p.line(x - 5, y - 3, x + 6, y + 3, 0xa67c50); p.poly([[x + 6, y + 3], [x + 8, y + 5], [x + 4, y + 6]], 0xe0bb80);
+      break;
+    case 'potato': round(5, 3.8, [0xc9a56e, 0xa98450, 0x86663c]); p.set(x - 1, y - 1, 0x6a4f2c); p.set(x + 2, y + 1, 0x6a4f2c); break;
+    case 'wheat':
+      for (const a of [-3, 0, 3]) { p.line(x + a * 0.4, y + 6, x + a, y - 2, 0xc9a23c); for (let k = 0; k < 4; k++) { p.set(x + a - 1, y - 2 - k, 0xe6c75a); p.set(x + a + 1, y - 2 - k, 0xd9b84a); p.set(x + a, y - 3 - k, 0xf0d67a); } }
+      p.rect(x - 2, y + 2, 4, 2, 0x8a6240);
+      break;
+    case 'corn':
+      p.ellipse(x, y - 1, 3.2, 6, (u, v, a, b) => ((a + b) % 2 ? 0xe9c94f : 0xcfa935));
+      p.poly([[x - 4, y - 2], [x, y + 6], [x - 1, y + 6]], 0x6f9a3e); p.poly([[x + 4, y - 2], [x, y + 6], [x + 1, y + 6]], 0x5b8533);
+      break;
+    case 'pumpkin':
+      p.ellipse(x, y, 6.5, 5, (u, v, a) => ((a - x + 40) % 4 === 0 ? 0xb5621c : u + v < 0 ? 0xf0a13c : 0xd97f28));
+      p.rect(x - 1, y - 7, 2, 3, 0x4f7a33);
+      break;
+    case 'beans':
+      p.poly([[x - 7, y + 3], [x - 5, y - 1], [x + 5, y - 3], [x + 7, y - 1], [x + 3, y + 3]], 0x76a44b);
+      for (const a of [-4, -1, 2, 5]) p.ellipse(x + a, y + (a < 0 ? 1 : 0) - 0.5, 1.5, 1.4, 0xa9cf6d);
+      break;
+    case 'cabbage':
+      p.ellipse(x, y, 6, 5, (u, v) => (u * u + v * v < 0.2 ? 0xcfe39a : u + v < 0 ? 0x86b35c : 0x5f9148));
+      p.line(x - 3, y - 3, x + 1, y + 3, 0x4c7a3b); p.line(x + 3, y - 3, x, y + 2, 0x4c7a3b);
+      break;
+    case 'berries':
+      for (const [a, b] of [[-3, 1], [2, 1], [-1, -2], [4, -2], [-5, -2], [0, 3]]) { p.ellipse(x + a, y + b, 2, 2, 0x8e2348); p.set(x + a - 1, y + b - 1, 0xd65c86); }
+      p.ellipse(x + 1, y - 5, 3, 1.4, 0x5f8c3d);
+      break;
+    case 'mushroom':
+      p.rect(x - 2, y, 4, 5, 0xe9e0c8); p.rect(x + 1, y, 1, 5, 0xbfb59b);
+      p.ellipse(x, y - 1, 6, 4, (u, v) => (v > 0.45 ? 0xe9e0c8 : u + v < 0 ? 0xb0683a : 0x8a4c28));
+      p.set(x - 2, y - 3, 0xf1e6cd); p.set(x + 2, y - 2, 0xf1e6cd);
+      break;
+    case 'apple':
+      round(5, 5, [0xe2574c, 0xc2382f, 0x8f2622]); p.line(x, y - 7, x + 1, y - 4, 0x4a3628); p.ellipse(x + 3, y - 6, 2, 1, 0x6f9a3e); p.set(x - 2, y - 2, 0xf6b0a4);
+      break;
+    case 'pear':
+      p.ellipse(x, y + 2, 5, 4, (u, v) => (u + v < 0 ? 0xe7d765 : 0xc2b13f)); p.ellipse(x, y - 2, 3, 3.5, (u, v) => (u + v < 0 ? 0xe7d765 : 0xc2b13f));
+      p.line(x, y - 7, x + 1, y - 5, 0x4a3628); p.ellipse(x + 3, y - 6, 2, 1, 0x6f9a3e);
+      break;
+  }
+}
+function carriedItem(res) { const p = new Pix(24, 20, 12, 15); drawItem(p, res, 12, 9); return p.outline(0x14100f, 150); }
+function itemPile(res, level) {
+  const p = new Pix(52, 40, 26, 30);
+  p.ellipse(27, 31, 8 + level * 5, 3.5 + level * 1.8, SHADOW, 60);
+  const spots = { 1: [[0, 0]], 2: [[-7, 0], [7, 1], [0, -5]], 3: [[-12, 1], [0, 3], [12, 1], [-6, -4], [6, -4], [0, -9]] }[level];
+  for (const [a, b] of spots) drawItem(p, res, 26 + a, 26 + b);
+  return p.outline(0x14100f, 130);
+}
+export function itemIconPix(res) { const p = new Pix(22, 20, 0, 0); drawItem(p, res, 11, 10); return p.outline(0x14100f, 160); }
+
 /* ---------- Pilhas e cargas ---------- */
 function logStack(n) {
   const p = new Pix(44, 30, 22, 20);
@@ -486,6 +572,10 @@ function house(rot, stage, style = 'house') {
     p.poly([a0, b0, top], 0x55575f); p.poly([b0, c0, top], 0x3f4048);
     p.rect(top[0], top[1] - 7, 1, 7, 0xd9b872); p.rect(top[0] - 2, top[1] - 5, 5, 1, 0xd9b872);
   }
+  if (stage === 4 && PROPS[style]) {
+    const [yardX, yardY] = rot % 2 === 0 ? [x1 + 0.18, y0 + 0.28] : [x0 + 0.3, y1 + 0.2];
+    PROPS[style](p, P, yardX, yardY);
+  }
   if (style === 'woodcutter' && stage === 4) {
     for (let i = 0; i < 4; i++) { const q = P(x1 + 0.1 - i * 0.18, y1 + 0.03, 3); p.ellipse(q[0], q[1], 3, 3.4, 0xc99d62); }
   }
@@ -559,6 +649,20 @@ function depot(rot, stage) {
 }
 
 const T_ower = t => t / 2;
+// Detalhes do lado de fora de cada oficina: mostram o que se faz ali.
+const rack = (p, P, x, y) => { post(p, P, x, y, 0, 20, 0x5d4530); post(p, P, x + 0.42, y - 0.02, 0, 20, 0x5d4530); beam(p, P, [x, y, 20], [x + 0.42, y - 0.02, 20], 0x6d4e34); };
+const PROPS = {
+  hunter(p, P, x, y) { rack(p, P, x, y); const q = P(x + 0.21, y, 12); drawItem(p, 'hide', q[0], q[1]); const m = P(x + 0.6, y + 0.1, 4); drawItem(p, 'meat', m[0], m[1]); },
+  fisher(p, P, x, y) { rack(p, P, x, y); for (let i = 0; i < 2; i++) { const q = P(x + 0.1 + i * 0.22, y, 12); drawItem(p, 'fish', q[0], q[1]); } },
+  tailor(p, P, x, y) { rack(p, P, x, y); const q = P(x + 0.21, y, 12); drawItem(p, 'coat', q[0], q[1]); },
+  herbalist(p, P, x, y) { rack(p, P, x, y); for (let i = 0; i < 2; i++) { const q = P(x + 0.1 + i * 0.22, y, 12); drawItem(p, 'herbs', q[0], q[1]); } },
+  smith(p, P, x, y) {
+    const a = P(x + 0.2, y, 2);
+    p.rect(a[0] - 3, a[1] - 8, 6, 8, 0x5a4230);
+    p.rect(a[0] - 7, a[1] - 13, 14, 3, 0x4a4d52); p.rect(a[0] - 7, a[1] - 13, 14, 1, 0x8d9198); p.rect(a[0] - 3, a[1] - 10, 6, 2, 0x35383c); p.rect(a[0] + 7, a[1] - 12, 3, 1, 0x4a4d52);
+    const t = P(x + 0.62, y + 0.1, 4); drawItem(p, 'tools', t[0], t[1]);
+  },
+};
 function market(rot) {
   const ox = 112, oy = 76, p = new Pix(224, 200, ox, oy), P = projector(ox, oy);
   dirtPad(p, P, 3, 3);
@@ -759,6 +863,10 @@ export function buildAll(add) {
   for (let look = 0; look < 6; look++) for (const dir of ['f', 'b']) {
     for (const fr of ['i', 'w0', 'w1', 'w2', 'w3', 't0', 't1', 's']) addPix(`c${look}_${dir}_${fr}`, citizenFrame(look, dir, fr));
   }
+  for (const res of ITEMS) {
+    addPix(`carry_${res}`, carriedItem(res));
+    [1, 2, 3].forEach(n => addPix(`pile_${res}_${n}`, itemPile(res, n)));
+  }
   addPix('carry_food', (() => {
     const p = new Pix(14, 12, 7, 9);
     p.ellipse(7, 6, 5, 4, (u, v, x, y) => (y % 2 ? 0xa07c48 : 0xbb9558));
@@ -850,6 +958,13 @@ const ICONS = {
   roof: ['................', '................', '.......ee.......', '......eeee......', '.....eeeeee.....', '....eeeeeeee....', '...eeeeeeeeee...', '..eeeeeeeeeeee..', '.eeeeeeeeeeeeee.', '...bbbbbbbbbb...', '...bbbaabbbbb...', '...bbbaabbbbb...', '...bbbaabbbbb...', '................', '................', '................'],
 };
 export function iconDataURL(name, doc, scale = 2) {
+  if (!ICONS[name]) {
+    const pix = itemIconPix(name), a = doc.createElement('canvas'), b = doc.createElement('canvas');
+    a.width = pix.w; a.height = pix.h; a.getContext('2d').putImageData(new ImageData(pix.d, pix.w, pix.h), 0, 0);
+    b.width = pix.w * scale; b.height = pix.h * scale;
+    const x2 = b.getContext('2d'); x2.imageSmoothingEnabled = false; x2.drawImage(a, 0, 0, b.width, b.height);
+    return b.toDataURL();
+  }
   const rows = ICONS[name];
   const c = doc.createElement('canvas');
   c.width = c.height = 16 * scale;

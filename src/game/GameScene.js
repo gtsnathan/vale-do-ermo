@@ -420,7 +420,7 @@ export class GameScene extends Phaser.Scene {
       const d = (x + y + 0.5) * DEPTH;
       if (Math.abs((v.d || 0) - d) > 1) { v.body.setDepth(d); v.cargo.setDepth(d + 0.2); v.d = d; }
       if (c.inv.res) {
-        const cn = `carry_${{ wood: 'wood', firewood: 'wood', stone: 'stone', iron: 'iron' }[c.inv.res] || 'food'}`;
+        const cn = `carry_${c.inv.res}`;
         if (v.cargoF !== cn) { this._setF(v.cargo, cn); v.cargoF = cn; }
         v.cargo.setVisible(true).setPosition(Math.round(px), Math.round(py) - 21);
       } else v.cargo.setVisible(false);
@@ -498,11 +498,19 @@ export class GameScene extends Phaser.Scene {
         if (left > 0) at(...slots.stone[i], `pile_stone_${lv(left, 8)}`);
       }
       if (ir > 0) at(...slots.iron[0], `pile_iron_${lv(ir, 8)}`);
+      [['firewood', 0.6, 1.5], ['hide', 1.05, 0.55], ['tools', 0.5, 0.55], ['coat', 1.0, 1.1], ['herbs', 0.5, 1.05]].forEach(([r, fx, fy]) => {
+        if (b.stock[r] > 0) at(fx, fy, `pile_${r}_${b.stock[r] >= 12 ? 3 : b.stock[r] >= 4 ? 2 : 1}`);
+      });
     } else if (!b.done && st <= 2) {
       const cost = BUILDINGS[b.type].cost;
       const w = b.delivered.wood, s = b.delivered.stone;
       if (w > 0 && cost.wood) at(b.w - 0.45, b.h - 0.35, `pile_wood_${w >= 12 ? 9 : w >= 7 ? 6 : w >= 3 ? 3 : 1}`, -2);
       if (s > 0 && cost.stone) at(0.45, b.h - 0.3, `pile_stone_${Math.min(3, Math.ceil(s / 2))}`, -2);
+    }
+    if (b.type === 'market' && b.done) {
+      [['fish', 0.75, 0.95], ['meat', 1.2, 0.95], ['apple', 2.2, 0.95], ['pumpkin', 2.6, 0.95], ['coat', 1.45, 2.45], ['tools', 1.95, 2.45]].forEach(([r, fx, fy]) => {
+        if (b.stock[r] > 0) at(fx, fy, `pile_${r}_1`, 12);
+      });
     }
     const sig = wanted.map(o => o.name).join();
     if (sig === v.sig) return;
@@ -524,7 +532,7 @@ export class GameScene extends Phaser.Scene {
         v = { img: Object.assign(this.add.image(sx, sy + 2, 'atlas', 'pile_wood_1'), { isWorld: true }).setDepth((p.x + p.y + 0.8) * DEPTH) };
         this.pileViews.set(p.id, v);
       }
-      const f = p.res === 'wood' || p.res === 'firewood' ? `pile_wood_${p.amount >= 9 ? 9 : p.amount >= 6 ? 6 : p.amount >= 3 ? 3 : 1}` : `pile_${p.res === 'stone' || p.res === 'iron' ? p.res : 'food'}_${Math.min(3, Math.ceil(p.amount / 2))}`;
+      const f = p.res === 'wood' ? `pile_wood_${p.amount >= 9 ? 9 : p.amount >= 6 ? 6 : p.amount >= 3 ? 3 : 1}` : (p.res === 'stone' || p.res === 'iron' ? `pile_${p.res}_${Math.min(3, Math.ceil(p.amount / 2))}` : `pile_${p.res}_${p.amount >= 6 ? 3 : p.amount >= 3 ? 2 : 1}`);
       if (v.f !== f) { this._setF(v.img, f); v.f = f; }
     }
     for (const [id, v] of this.pileViews) if (!seen.has(id)) { v.img.destroy(); this.pileViews.delete(id); }
