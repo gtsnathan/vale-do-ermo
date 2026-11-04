@@ -1,4 +1,4 @@
-import { COAT_LIFE, TOOL_LIFE, isFood, ADULT_AGE, BIRTH_REST, DAY, FAMILIES, FEMALE, FERTILE_MAX, BUILDINGS, MALE, MARRY_AGE, MEAL, OLD_AGE, PREGNANCY, PROFESSIONS, YEAR } from './defs.js';
+import { GROW_SPEED, COAT_LIFE, TOOL_LIFE, isFood, ADULT_AGE, BIRTH_REST, DAY, FAMILIES, FEMALE, FERTILE_MAX, BUILDINGS, MALE, MARRY_AGE, MEAL, OLD_AGE, PREGNANCY, PROFESSIONS, YEAR } from './defs.js';
 
 function citizen(id, name, sex, age, family, x, y, look) {
   return {
@@ -98,7 +98,7 @@ export class PopulationManager {
     const S = this.sim;
     for (const c of [...S.citizens]) {
       const wasChild = this.isChild(c);
-      c.age += 1 / YEAR;
+      c.age += (c.age < MARRY_AGE ? GROW_SPEED : 1) / YEAR;
       if (wasChild && !this.isChild(c)) {
         const school = S.work.schoolSeat();
         if (school) c.profession = 'student';
@@ -257,6 +257,45 @@ export class PopulationManager {
     if (h.residents.length < this.maxRes(h)) { k.home = h.id; h.residents.push(k.id); }
     S.stats.births++;
     this.news('birth', `Nasceu ${first}, filho${sex === 'F' ? 'a' : ''} de ${mother.name}.`.replace('filhoa', 'filha'));
+  }
+  // Migrantes: vêm famílias quando há casa vazia ou a vila cresce bem alimentada.
+  migrate() {
+    const S = this.sim, W = S.world, r = S.rng;
+    if (!S.config.migration || !S.citizens.length) return false;
+    const days = S.foodDays();
+    const happy = S.citizens.reduce((a, c) => a + c.happiness, 0) / S.citizens.length;
+    if (days < 6 || happy < 40) return false;
+    const empty = this._houses().filter(h => !h.residents.length).length;
+    const boom = days > 14 && this.waitingHome() < 2 && S.citizens.length >= 15;
+    if (!(empty > 0 ? r.chance(0.3) : boom && r.chance(0.05))) return false;
+    const c0 = S.citizens.find(c => !c.inside) || S.citizens[0];
+    const comp = W.compAt(c0.x | 0, c0.y | 0);
+    let spot = null;
+    for (let i = 0; i < 200 && !spot; i++) {
+      const side = r.int(0, 3), t = r.int(0, W.w - 1);
+      const [x, y] = side === 0 ? [t, 1] : side === 1 ? [t, W.h - 2] : side === 2 ? [1, t] : [W.w - 2, t];
+      if (W.compAt(x, y) === comp) spot = [x, y];
+    }
+    if (!spot) return false;
+    const fam = r.pick(FAMILIES);
+    const add = (first, sex, age) => {
+      const k = citizen(S.newId(), `${first} ${fam}`, sex, age, fam, spot[0] + 0.5, spot[1] + 0.5, sex === 'M' ? r.int(0, 2) : 3 + r.int(0, 2));
+      S.citizens.push(k);
+      return k;
+    };
+    const m = add(r.pick(MALE), 'M', r.int(20, 42)), f = add(r.pick(FEMALE), 'F', r.int(18, 38));
+    m.spouse = f.id; f.spouse = m.id;
+    const kids = r.int(0, 2);
+    for (let i = 0; i < kids; i++) {
+      const sex = r.chance(0.5) ? 'M' : 'F';
+      const k = add(r.pick(sex === 'M' ? MALE : FEMALE), sex, r.int(1, 10));
+      k.profession = 'child'; k.parents = [f.id, m.id];
+    }
+    if (r.chance(0.12) && S.config.disease) this.infect(m);
+    S.stats.migrants = (S.stats.migrants || 0) + 2 + kids;
+    this.news('good', `A família ${fam} chegou de longe com ${2 + kids} pessoas e quer ficar na vila.`);
+    this.assignHomes();
+    return true;
   }
   waitingHome() {
     return this.sim.citizens.filter(c => !this.isChild(c) && (c.home == null || this._withParents(c)) && c.age >= MARRY_AGE).length;

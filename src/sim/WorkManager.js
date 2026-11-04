@@ -15,7 +15,7 @@ export class WorkManager {
       case 'vendor': return this._assignVend(c, comp, b);
       case 'trader': return this._assignExport(c, comp, b);
       case 'teacher': case 'doctor':
-        if (b?.done) return this._keep(c, comp, b) || this._staffTask(c, b);
+        if (b?.done) return this._staffTask(c, b);
         return false;
       case 'woodcutter': case 'fisher': case 'smith': case 'tailor': case 'miner':
         return b?.done ? this._assignCraft(c, comp, b) : false;
@@ -26,10 +26,12 @@ export class WorkManager {
   /* ---------- Oficinas ---------- */
   _assignCraft(c, comp, b) {
     const R = BUILDINGS[b.type].recipe;
-    if (this._fetchInput(c, comp, b, R.in, 3)) return true;
     for (const r in R.in) if ((b.input[r] || 0) < R.in[r]) return false;
     // Não produz sem ter onde guardar. Limite evita gastar toda a madeira em lenha.
     const S = this.sim;
+    // Com a saída cheia, espera os carregadores levarem o que já foi feito.
+    const waiting = b.outPile != null ? S.resources.pile(b.outPile) : null;
+    if (waiting && waiting.res === R.out && waiting.amount >= R.n * 4) return false;
     if (!S.storage.nearestWithSpace(b.door.x, b.door.y, comp, R.out)) return false;
     if (R.in.wood && S.storage.total(R.out) >= (b.limit ?? 60)) return false;
     if (!R.in.wood && !R.in.hide && S.storage.total(R.out) >= (b.limit ?? 200)) return false;
@@ -37,25 +39,6 @@ export class WorkManager {
     for (const r in R.in) { b.input[r] -= R.in[r]; S.stats.consumed[r] += R.in[r]; }
     c.task = { kind: 'craft', buildingId: b.id, w: 0 };
     return true;
-  }
-  _fetchInput(c, comp, b, needs, batch) {
-    const S = this.sim;
-    for (const r in needs) {
-      if ((b.input[r] || 0) >= needs[r]) continue;
-      const d = S.storage.nearestWith(b.door.x, b.door.y, comp, r);
-      if (!d) continue;
-      const n = Math.min(batch, CARRY[r], S.storage.available(d, r));
-      d.reserved[r] += n;
-      c.task = { kind: 'craftFetch', depotId: d.id, buildingId: b.id, res: r, n, step: 0 };
-      return true;
-    }
-    return false;
-  }
-  _keep(c, comp, b) {
-    const k = BUILDINGS[b.type].keep;
-    if (!k) return false;
-    for (const r in k) if ((b.input[r] || 0) < k[r] && this._fetchInput(c, comp, b, { [r]: k[r] }, 4)) return true;
-    return false;
   }
   craftFetch(c, t, ai) {
     const S = this.sim, d = S.building(t.depotId), b = S.building(t.buildingId);
@@ -73,6 +56,7 @@ export class WorkManager {
     if (r === 'fail') return ai._fail(c);
     if (r !== 'arrived') return;
     b.input[t.res] = (b.input[t.res] || 0) + t.n;
+    if (b.enr) b.enr[t.res] = Math.max(0, (b.enr[t.res] || 0) - t.n);
     c.inv.res = null; c.inv.amount = 0; c.task = null; c.think = 0.1;
   }
   craft(c, t, ai) {
@@ -91,7 +75,7 @@ export class WorkManager {
     const def = BUILDINGS[b.type], R = def.recipe;
     if (t.w < R.t) return;
     S.stats.produced[R.out] += R.n;
-    c.inv.res = R.out; c.inv.amount = R.n;
+    b.outPile = S.resources.drop(b.door.x, b.door.y, R.out, R.n).id;
     c.task = null; c.think = 0.1; c.anim = 'idle';
     if (def.risky && S.config.events && S.rng.next() < 0.0015) S.eventsMgr.accident(c, def.name);
   }
@@ -103,7 +87,7 @@ export class WorkManager {
   staff(c, t, ai) {
     const S = this.sim, b = S.building(t.buildingId);
     if (!b || S.isNight()) { c.task = null; return; }
-    const r = ai._go(c, [[b.door.x, b.door.y]]);
+    const r = ai._go(c, [b.door ? [b.door.x, b.door.y] : [b.x + (c.id % b.w), b.y + (c.id % b.h)]]);
     if (r === 'fail') { c.task = null; c.think = 1; return; }
     if (r !== 'arrived') return;
     c.anim = 'idle';
@@ -255,7 +239,7 @@ export class WorkManager {
     if (t.w < 3) return;
     S.animals.splice(S.animals.indexOf(a), 1);
     S.stats.produced.meat += 5; S.stats.produced.hide += 2;
-    c.inv.res = 'meat'; c.inv.amount = 5;
+    S.resources.drop(c.x | 0, c.y | 0, 'meat', 5);
     S.resources.drop(c.x | 0, c.y | 0, 'hide', 2);
     c.task = null; c.think = 0.2; c.anim = 'idle';
   }
@@ -306,10 +290,10 @@ export class WorkManager {
     if (f.wool >= 2) {
       const n = Math.floor(Math.min(f.wool, 4));
       f.wool -= n; S.stats.produced.hide += n;
-      c.inv.res = 'hide'; c.inv.amount = n;
+      S.resources.drop(c.x | 0, c.y | 0, 'hide', n);
     } else if (f.herd >= cap && f.herd > 2) {
       f.herd--; S.stats.produced.meat += 4;
-      c.inv.res = 'meat'; c.inv.amount = 4;
+      S.resources.drop(c.x | 0, c.y | 0, 'meat', 4);
     }
     c.task = null; c.think = 0.2; c.anim = 'idle';
   }

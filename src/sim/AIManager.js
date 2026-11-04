@@ -272,8 +272,8 @@ export class AIManager {
     c.anim = 'work'; c.tool = 'hoe';
     t.w += STEP;
     if (t.w < 7) return;
-    const res = c.profession === 'herbalist' ? 'herbs' : c.inv.res || (S.rng.chance(0.6) ? 'berries' : 'mushroom');
-    c.inv.res = res; c.inv.amount += 2;
+    const res = c.profession === 'herbalist' ? 'herbs' : S.rng.chance(0.6) ? 'berries' : 'mushroom';
+    S.resources.drop(c.x | 0, c.y | 0, res, 2);
     S.stats.produced[res] += 2;
     c.task = null; c.think = 0.2; c.anim = 'idle';
   }

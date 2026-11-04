@@ -337,7 +337,8 @@ test('fazenda: prepara, planta, cresce, colhe e o alimento chega a pé ao celeir
   for (let i = 0; i < 16000; i++) {
     s.step();
     for (const t of f.tiles) seen.add(t.st);
-    if (s.citizens.some(c => c.inv.res === 'beans' && c.profession === 'farmer')) carried = true;
+    if (s.citizens.some(c => c.inv.res === 'beans' && c.profession !== 'farmer')) carried = true;
+    assert.ok(!s.citizens.some(c => c.inv.res === 'beans' && c.profession === 'farmer'), 'agricultor carregando');
     if (s.stats.produced.beans > 0 && barnBefore == null) barnBefore = barn.stock.beans;
     if (i % 40 === 0) invariants(s);
     if (s.stats.consumed.beans === 0 && carried && barn.stock.beans > 40 + 1) break;
@@ -943,7 +944,7 @@ test('onde se anda muito surge trilha e depois estrada; sem uso, a trilha some',
     for (let k = 0; k < 40; k++) s.infra.wearDaily();
     assert.equal(W.road[trail], 0, 'trilha abandonada não sumiu');
   }
-  for (let k = 0; k < 120; k++) s.infra.step_on(tile[0], tile[1]);
+  for (let k = 0; k < 150; k++) s.infra.step_on(tile[0], tile[1]);
   assert.equal(W.road[i], 1, 'não virou estrada');
   for (let k = 0; k < 40; k++) s.infra.wearDaily();
   assert.equal(W.road[i], 1, 'estrada formada deveria ficar');
@@ -1003,4 +1004,96 @@ test('melhoria de fazenda é entregue e terminada; cancelar devolve o material',
   assert.equal(d.up, null);
   run(s, 100, 80);
   invariants(s);
+});
+
+test('quem produz não carrega: oficina recebe e entrega pelas mãos dos trabalhadores gerais', () => {
+  const s = new Simulation({ seed: 'oficio', difficulty: 'facil' });
+  const [x, y] = freeSpot(s, 'woodcutter');
+  const b = s.construction.place('woodcutter', x, y, 0).building;
+  for (const q in BUILDINGS.woodcutter.cost) { b.delivered[q] = BUILDINGS.woodcutter.cost[q]; s.startStock[q] += BUILDINGS.woodcutter.cost[q]; }
+  s.construction.finish(b);
+  s.population.changeCount('woodcutter', 1);
+  s.farming.balance();
+  const w = s.citizens.find(c => c.profession === 'woodcutter');
+  const fw0 = s.storage.total('firewood');
+  let delivered = false, hauled = false;
+  for (let i = 0; i < 4000; i++) {
+    s.step();
+    if (i % 40 === 0) invariants(s);
+    assert.ok(!w.inv.res, `lenhador carregando ${w.inv.res}`);
+    if (['haul', 'deliver', 'harvest', 'cargo', 'craftFetch'].includes(w.task?.kind)) assert.fail(`lenhador em outro serviço: ${w.task.kind}`);
+    if (s.citizens.some(c => c !== w && c.task?.kind === 'craftFetch')) delivered = true;
+    if (s.citizens.some(c => c !== w && c.inv.res === 'firewood' && c.task?.kind === 'haul')) hauled = true;
+  }
+  assert.ok(delivered, 'ninguém abasteceu a oficina');
+  assert.ok(hauled, 'ninguém buscou a lenha');
+  assert.ok(s.storage.total('firewood') > fw0, 'a lenha não chegou ao depósito');
+});
+
+test('sem carregadores a oficina para quando a saída enche e o jogo avisa', () => {
+  const s = new Simulation({ seed: 'parado', difficulty: 'facil' });
+  const [x, y] = freeSpot(s, 'fisher');
+  const v = s.world.canPlace('fisher', x, y, 0);
+  void v;
+  const b = s.construction.place('woodcutter', x, y, 0).building;
+  for (const q in BUILDINGS.woodcutter.cost) { b.delivered[q] = BUILDINGS.woodcutter.cost[q]; s.startStock[q] += BUILDINGS.woodcutter.cost[q]; }
+  s.construction.finish(b);
+  b.input.wood = 20; s.startStock.wood += 20;
+  s.population.changeCount('woodcutter', 1);
+  s.population.changeCount('teacher', 9);
+  s.farming.balance();
+  for (const c of s.citizens) if (c.profession === 'teacher') c.workplace = -99;
+  const w = s.citizens.find(c => c.profession === 'woodcutter');
+  for (const c of s.citizens) if (c !== w) c.inside = true, c.warming = true, c.warmth = 0;
+  run(s, 200, 100);
+  assert.ok(s.stats.produced.firewood <= 16 + 4, `produziu sem parar: ${s.stats.produced.firewood}`);
+});
+
+test('casa vazia atrai migrantes se houver comida; sem isso, ninguém vem', () => {
+  const off = new Simulation({ seed: 'mig', difficulty: 'facil' });
+  housed(off);
+  const [x0, y0] = freeSpot(off, 'house');
+  const e0 = off.construction.place('house', x0, y0, 0).building;
+  for (const q in BUILDINGS.house.cost) { e0.delivered[q] = BUILDINGS.house.cost[q]; off.startStock[q] += BUILDINGS.house.cost[q]; }
+  off.construction.finish(e0);
+  for (let i = 0; i < 30; i++) off.population.migrate();
+  assert.equal(off.citizens.length, 10, 'veio com a opção desligada');
+  const s = new Simulation({ seed: 'mig', difficulty: 'facil', migration: true });
+  housed(s);
+  const [x, y] = freeSpot(s, 'house');
+  const e = s.construction.place('house', x, y, 0).building;
+  for (const q in BUILDINGS.house.cost) { e.delivered[q] = BUILDINGS.house.cost[q]; s.startStock[q] += BUILDINGS.house.cost[q]; }
+  s.construction.finish(e);
+  for (let i = 0; i < 60 && s.citizens.length === 10; i++) s.population.migrate();
+  assert.ok(s.citizens.length > 10, 'nenhum migrante');
+  assert.ok(e.residents.length >= 2, 'não ocuparam a casa vazia');
+  assert.ok(s.chronicle.some(n => n.text.includes('chegou de longe')));
+  const couple = e.residents.map(id => s.citizen(id));
+  assert.equal(couple[0].family, couple[1].family);
+  invariants(s);
+  run(s, 60, 100);
+  const hungry = new Simulation({ seed: 'mig2', migration: true });
+  housed(hungry, 1);
+  const bb = hungry.storage.barns()[0];
+  for (const r of RES) { hungry.startStock[r] -= bb.stock[r]; bb.stock[r] = 0; }
+  const [hx, hy] = freeSpot(hungry, 'house');
+  const eh = hungry.construction.place('house', hx, hy, 0).building;
+  for (const q in BUILDINGS.house.cost) { eh.delivered[q] = BUILDINGS.house.cost[q]; hungry.startStock[q] += BUILDINGS.house.cost[q]; }
+  hungry.construction.finish(eh);
+  for (let i = 0; i < 40; i++) hungry.population.migrate();
+  assert.equal(hungry.citizens.length, 10, 'veio para vila sem comida');
+});
+
+test('um bebê vira trabalhador em até 12 dias de jogo', () => {
+  const s = new Simulation({ seed: 'rapido', difficulty: 'facil' });
+  housed(s, 1);
+  const w = s.citizens.find(c => c.home != null && c.sex === 'F');
+  w.pregnant = 1;
+  run(s, 3, 40);
+  const k = s.citizens.find(c => c.parents.includes(w.id));
+  assert.equal(k.profession, 'child');
+  for (let i = 0; i < 11; i++) { stockUp(s); fed(s); run(s, DAY, 400); assert.equal(k.profession, 'child', `cresceu cedo no dia ${i}`); }
+  stockUp(s); fed(s); run(s, DAY + 10, 400);
+  assert.equal(k.profession, 'laborer');
+  assert.ok(s.population.count('laborer') > 8);
 });

@@ -40,8 +40,8 @@ export const FORAGE_RADIUS = 14;
 export const PROFESSIONS = { laborer: 'Trabalhador geral', builder: 'Construtor', farmer: 'Agricultor', gatherer: 'Coletor',
   woodcutter: 'Lenhador', forester: 'Silvicultor', fisher: 'Pescador', hunter: 'Caçador', herder: 'Pastor', herbalist: 'Herbalista',
   miner: 'Mineiro', smith: 'Ferreiro', tailor: 'Alfaiate', teacher: 'Professor', doctor: 'Médico', vendor: 'Vendedor', trader: 'Comerciante' };
-export const PROF_NOTE = { laborer: 'Corta, minera e carrega', builder: 'Só eles erguem obras', farmer: 'Fazendas e pomares', gatherer: 'Cabana de coleta',
-  woodcutter: 'Madeira vira lenha', forester: 'Planta e corta árvores', fisher: 'Cabana de pesca', hunter: 'Carne e couro', herder: 'Lã e carne da pastagem', herbalist: 'Colhe ervas',
+export const PROF_NOTE = { laborer: 'Corta, minera e faz todo o transporte', builder: 'Só eles erguem obras', farmer: 'Fazendas e pomares', gatherer: 'Cabana de coleta',
+  woodcutter: 'Só corta lenha, não carrega', forester: 'Planta e corta árvores', fisher: 'Cabana de pesca', hunter: 'Carne e couro', herder: 'Lã e carne da pastagem', herbalist: 'Colhe ervas',
   miner: 'Pedreira e mina', smith: 'Faz ferramentas', tailor: 'Faz roupas', teacher: 'Dá aula na escola', doctor: 'Trata doentes', vendor: 'Abastece o mercado', trader: 'Leva mercadoria ao posto' };
 export const SEASONS = ['Primavera', 'Verão', 'Outono', 'Inverno'];
 export const SEASON_LEN = DAY * 1.5;
@@ -54,6 +54,7 @@ export const YEAR_DAYS = 6;                 // um ano tem 6 dias de jogo
 export const YEAR = DAY * YEAR_DAYS;
 export const ADULT_AGE = 12;                // criança não trabalha; a partir daqui, sim
 export const MARRY_AGE = 16;
+export const GROW_SPEED = 6;                // até os 16 anos, a idade passa 6 vezes mais rápido
 export const FERTILE_MAX = 45;
 export const PREGNANCY = DAY * 3;
 export const BIRTH_REST = DAY * 3;

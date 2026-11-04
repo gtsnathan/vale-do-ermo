@@ -17,7 +17,7 @@ import { EventsManager } from './EventsManager.js';
 // Núcleo sem renderização: roda igual no navegador e nos testes em Node.
 export class Simulation {
   constructor(config = {}) {
-    this.config = { size: 'medio', difficulty: 'normal', seed: 'ermo', events: false, disease: false, ...config };
+    this.config = { size: 'medio', difficulty: 'normal', seed: 'ermo', events: false, disease: false, migration: false, ...config };
     const seed = hashSeed(this.config.seed);
     this.seed = seed;
     const gen = generateTerrain(MAP_SIZES[this.config.size], seed);
@@ -138,7 +138,7 @@ export class Simulation {
       this.eventsMgr.burnTick();
       this._burnFuel();
       const d = this.day();
-      if (d !== this.lastDay) { this.lastDay = d; this.population.daily(); this.eventsMgr.daily(); this.infra.wearDaily(); this._report(); }
+      if (d !== this.lastDay) { this.lastDay = d; this.population.daily(); this.eventsMgr.daily(); this.population.migrate(); this.infra.wearDaily(); this._report(); }
       this._alerts();
     }
   }
@@ -207,6 +207,15 @@ export class Simulation {
     if (weak) out.push({ id: 'weak', level: 'bad', text: `${weak} aldeões estão muito fracos e podem morrer.` });
     const idle = grown.filter(c => c.task && c.task.kind === 'idle').length;
     if (grown.length && idle >= grown.length && !this.isNight()) out.push({ id: 'idle', level: 'info', text: 'Todos estão sem tarefa. Marque recursos ou ordene uma construção.' });
+    const waiting = this.piles.filter(p => p.amount > p.reserved).reduce((a, p) => a + p.amount - p.reserved, 0);
+    if (waiting > 25) out.push({ id: 'haul', level: 'warn', text: `Há ${waiting} itens no chão esperando transporte. Faltam trabalhadores gerais.` });
+    // Concordância quando o número é 1.
+    for (const a of out) {
+      if (/^(Faltam )?1 /.test(a.text)) {
+        a.text = a.text.replace('Faltam 1 vagas', 'Falta 1 vaga').replace('1 aldeões', '1 aldeão').replace('1 adultos esperam', '1 adulto espera').replace('1 mortos', '1 morto')
+          .replace('1 profissionais', '1 profissional').replace('estão', 'está').replace('passam', 'passa').replace('andam', 'anda').replace('dormem', 'dorme').replace('rendem', 'rende').replace('doentes', 'doente').replace('podem', 'pode').replace('estão', 'está').replace('muito fracos', 'muito fraco');
+      }
+    }
     this.alerts = out;
   }
 }

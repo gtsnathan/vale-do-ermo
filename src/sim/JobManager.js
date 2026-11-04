@@ -21,7 +21,7 @@ export class JobManager {
       || (c.profession === 'builder' && this._build(c, comp))
       || (c.profession === 'farmer' && this._farmNext(c, comp))
       || ((c.profession === 'gatherer' || c.profession === 'herbalist') && this._forage(c, comp))
-      || this._supply(c, comp) || S.infra.assign(c, comp) || this._haul(c, comp) || this._harvest(c, comp) || this._idle(c);
+      || this._atPost(c) || this._supply(c, comp) || this._supplyInput(c, comp) || S.infra.assign(c, comp) || this._haul(c, comp) || this._harvest(c, comp) || this._idle(c);
   }
 
   // Comer em casa se houver despensa; sem isso, come direto no celeiro.
@@ -38,6 +38,38 @@ export class JobManager {
     d.reserved[res]++;
     c.task = { kind: 'eatBarn', depotId: d.id, res };
     return true;
+  }
+  // Quem tem posto fica nele esperando trabalho. Só ofícios parados pelo inverno ajudam em outros serviços.
+  _atPost(c) {
+    const S = this.sim;
+    if (c.workplace == null || c.profession === 'laborer' || c.profession === 'builder') return false;
+    const place = S.building(c.workplace);
+    if (!place) return false;
+    if (S.season.index() === 3 && ['farmer', 'gatherer', 'herbalist', 'forester', 'herder'].includes(c.profession)) return false;
+    c.task = { kind: 'staff', buildingId: place.id, w: 3 + S.rng.next() * 3 };
+    return true;
+  }
+  // Trabalhadores gerais abastecem as oficinas: o artesão não sai do posto.
+  _supplyInput(c, comp) {
+    const S = this.sim;
+    for (const b of S.buildings) {
+      if (!b.done || !b.input || !S.farming.workers(b) || S.world.compAt(b.door.x, b.door.y) !== comp) continue;
+      const def = BUILDINGS[b.type];
+      const wants = def.keep || Object.fromEntries(Object.entries(def.recipe.in).map(([r, n]) => [r, n * 4]));
+      for (const r in wants) {
+        b.enr = b.enr || {};
+        const short = wants[r] - (b.input[r] || 0) - (b.enr[r] || 0);
+        if (short <= 0) continue;
+        const d = S.storage.nearestWith(b.door.x, b.door.y, comp, r);
+        if (!d) continue;
+        const n = Math.min(short, CARRY[r], S.storage.available(d, r));
+        d.reserved[r] += n;
+        b.enr[r] = (b.enr[r] || 0) + n;
+        c.task = { kind: 'craftFetch', depotId: d.id, buildingId: b.id, res: r, n, step: 0 };
+        return true;
+      }
+    }
+    return false;
   }
   // Com frio demais, volta para casa para se aquecer.
   _warmUp(c) {
@@ -258,6 +290,7 @@ export class JobManager {
         const d = S.building(t.depotId), to = S.building(t.toId);
         if (t.kind !== 'craftFetch' && to && to.done) to.incoming -= t.n;
         if (t.step === 0 && d && d.done) d.reserved[t.res] -= t.n;
+        if (t.kind === 'craftFetch') { const b = S.building(t.buildingId); if (b?.enr) b.enr[t.res] = Math.max(0, (b.enr[t.res] || 0) - t.n); }
         break;
       }
       case 'road': S.infra.release(t); break;
@@ -300,8 +333,8 @@ export class JobManager {
       case 'cure': return 'Indo ao hospital';
       case 'equip': return `Buscando ${low(t.res)}`;
       case 'craft': return `Produzindo ${low(BUILDINGS[S.building(t.buildingId)?.type]?.recipe?.out)}`;
-      case 'craftFetch': return `Buscando ${low(t.res)} para a oficina`;
-      case 'staff': return ({ teacher: 'Dando aula', doctor: 'Atendendo no hospital' })[c.profession] || 'Trabalhando';
+      case 'craftFetch': return t.step === 0 ? `Buscando ${low(t.res)} para a oficina` : `Levando ${low(t.res)} à oficina`;
+      case 'staff': return ({ teacher: 'Dando aula', doctor: 'Atendendo no hospital' })[c.profession] || 'No posto, esperando trabalho';
       case 'study': return 'Estudando na escola';
       case 'vend': return `Levando ${low(t.res)} ao mercado`;
       case 'export': return `Levando ${low(t.res)} ao posto`;

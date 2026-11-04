@@ -1,5 +1,5 @@
 import { iconDataURL } from '../art/sprites.js';
-import { BUILDINGS, CROPS, DAY, DIFFICULTY, FARM_MAX, FIELD_CROPS, FOODS, LEVEL_MAX, MAP_SIZES, MATERIALS, NODE, ORCHARD_CROPS, PROFESSIONS, PROF_NOTE, RES, RES_LABEL, TOP_RES, VALUE } from '../sim/defs.js';
+import { ADULT_AGE, GROW_SPEED, YEAR_DAYS, BUILDINGS, CROPS, DAY, DIFFICULTY, FARM_MAX, FIELD_CROPS, FOODS, LEVEL_MAX, MAP_SIZES, MATERIALS, NODE, ORCHARD_CROPS, PROFESSIONS, PROF_NOTE, RES, RES_LABEL, TOP_RES, VALUE } from '../sim/defs.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s).replace(/[&<>"]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
@@ -16,16 +16,17 @@ export class UIManager {
     game.events.on('tool', () => this._syncTool());
     game.events.on('placed', r => { if (!r.ok) this.toast(r.reason); else this.toast('Obra marcada. Os aldeões vão buscar o material.'); });
     game.events.on('marked', ({ n, value, types }) => {
-      if (!value) return this.toast(n ? `${n} marcas removidas.` : 'Nenhuma marca nesta área.');
+      if (!value) return this.toast(n ? `${n} ${n === 1 ? 'marca removida' : 'marcas removidas'}.` : 'Nenhuma marca nesta área.');
       const what = types.includes('tree') ? 'árvores' : 'rochas';
-      this.toast(n ? `${n} ${what} marcadas para coleta.` : `Nenhuma ${what === 'árvores' ? 'árvore' : 'rocha'} nesta área.`);
+      this.toast(n ? `${n} ${n === 1 ? (what === 'árvores' ? 'árvore marcada' : 'rocha marcada') : `${what} marcadas`} para coleta.` : `Nenhuma ${what === 'árvores' ? 'árvore' : 'rocha'} nesta área.`);
     });
     game.events.on('farmPlaced', r => this.toast(r.ok ? 'Área criada. Defina os trabalhadores em Gestão.' : r.reason));
     game.events.on('news', e => { if (e.kind !== 'family' && e.kind !== 'sick') this.toast(e.text); });
-    game.events.on('roadPlaced', ({ n }) => this.toast(n ? `${n} tiles encomendados.` : 'Nada a construir neste trecho.'));
+    game.events.on('roadPlaced', ({ n }) => this.toast(n ? `Obra encomendada: ${n} ${n === 1 ? 'trecho' : 'trechos'}.` : 'Nada a construir neste trecho.'));
     game.events.on('toggle-pause', () => this.setSpeed(this.scene.speed === 0 ? (this.prevSpeed || 1) : 0));
     game.events.on('speed', s => this.setSpeed(s));
     this.tickT = 0;
+    if (innerWidth < 720) $('#goals').classList.add('min');
   }
   attach(scene) { this.scene = scene; this._syncTool(); this.setSpeed(scene.speed); }
 
@@ -120,7 +121,7 @@ export class UIManager {
     $('#m-size').innerHTML = sz; $('#m-diff').innerHTML = df;
     $('#m-seed').value = String(Math.floor(Math.random() * 90000) + 10000);
     $('#m-new').addEventListener('click', () => {
-      this.actions.newGame({ size: $('#m-size').value, difficulty: $('#m-diff').value, seed: $('#m-seed').value.trim() || 'ermo', disease: true, events: $('#m-dis').checked });
+      this.actions.newGame({ size: $('#m-size').value, difficulty: $('#m-diff').value, seed: $('#m-seed').value.trim() || 'ermo', disease: true, events: $('#m-dis').checked, migration: $('#m-mig').checked });
       this.hideMenu();
     });
     $('#m-dice').addEventListener('click', () => { $('#m-seed').value = String(Math.floor(Math.random() * 90000) + 10000); this.actions.preview($('#m-seed').value, $('#m-size').value, $('#m-diff').value); });
@@ -304,7 +305,7 @@ export class UIManager {
       const c = sim.citizen(s.id); if (!c) { S.selected = null; return; }
       title = c.name;
       const home = c.home != null ? sim.building(c.home) : null;
-      body = row('Agora', esc(sim.jobs.describe(c))) + row('Profissão', PROFESSIONS[c.profession] || (c.profession === 'student' ? 'Estudante' : 'Criança')) + row('Idade', `${Math.floor(c.age)} anos`) + row('Sexo', c.sex === 'M' ? 'Masculino' : 'Feminino') +
+      body = row('Agora', esc(sim.jobs.describe(c))) + row('Profissão', PROFESSIONS[c.profession] || (c.profession === 'student' ? 'Estudante' : 'Criança')) + row('Idade', `${Math.floor(c.age)} anos`) + (c.age < ADULT_AGE ? row('Começa a trabalhar em', `${Math.ceil((ADULT_AGE - c.age) * YEAR_DAYS / GROW_SPEED)} dias`) : '') + row('Sexo', c.sex === 'M' ? 'Masculino' : 'Feminino') +
         row('Família', esc(c.family)) + row('Cônjuge', person(c.spouse)) +
         (c.parents?.some(id => sim.citizen(id)) ? row('Pais', c.parents.filter(id => sim.citizen(id)).map(person).join(', ')) : '') +
         (sim.population.children(c).length ? row('Filhos', sim.population.children(c).map(k => person(k.id)).join(', ')) : '') +
@@ -371,7 +372,7 @@ export class UIManager {
       const fert = Math.round(sim.farming.fertility(f) * 100);
       body = `<div class="crops">${(f.kind === 'pasture' ? [] : f.kind === 'orchard' ? ORCHARD_CROPS : FIELD_CROPS).map(k => `<button class="crop ${f.crop === k ? 'on' : ''}" data-act="crop" data-crop="${k}">${RES_LABEL[k]}</button>`).join('')}</div>` +
         (f.kind === 'pasture' ? row('Rebanho', `${f.herd} ovelhas`) + row('Lã pronta', Math.floor(f.wool)) :
-        `<p class="note">${RES_LABEL[f.crop]}: colhe em ${CROPS[f.crop].grow / DAY} dias, rende ${CROPS[f.crop].yield} por tile. Parado no inverno.</p>` +
+        `<p class="note">${RES_LABEL[f.crop]}: colhe em ${String(CROPS[f.crop].grow / DAY).replace('.', ',')} dias, rende ${CROPS[f.crop].yield} por tile. Parado no inverno.</p>` +
         row('Solo fértil', `${fert}%`) + row('Sem preparo', cnt[0]) + row('Prontos para plantar', cnt[1]) + row('Crescendo', cnt[2]) + row('Prontos para colher', cnt[3])) +
         `<div class="row"><span>Agricultores</span><b class="step"><button data-act="wk" data-d="-1" aria-label="Menos vagas">−</button>${staff.length}/${f.maxWorkers}<button data-act="wk" data-d="1" aria-label="Mais vagas">+</button></b></div>` +
         (staff.length < f.maxWorkers ? '<p class="note warn">Faltam agricultores. Abra Gestão para definir mais.</p>' : '') +

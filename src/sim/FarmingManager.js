@@ -93,7 +93,7 @@ export class FarmingManager {
     else if (t.st === 3) {
       const y = this.tileYield(t);
       S.stats.produced[t.crop] += y;
-      c.inv.res = t.crop; c.inv.amount += y;
+      S.resources.drop(t.x, t.y, t.crop, y);
       if (CROPS[t.crop].tree) { t.st = 2; t.g = 0; }
       else { t.st = 1; t.crop = null; t.g = 0; }
     }
