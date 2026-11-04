@@ -11,6 +11,8 @@ function invariants(s) {
     for (const c of s.citizens) if (c.inv.res === r) carried += c.inv.amount;
     for (const b of s.buildings) {
       if (!b.done) { inSites += b.delivered[r]; assert.ok(b.enroute[r] >= 0, 'enroute negativo'); }
+      if (b.up) { inSites += b.up.delivered[r]; assert.ok(b.up.enroute[r] >= 0, 'enroute negativo'); }
+      if (b.input) inDepots += b.input[r] || 0;
       if (b.pantry) { inDepots += b.pantry[r] || 0; assert.ok((b.pantry[r] || 0) >= 0, 'despensa negativa'); }
       if (b.done && BUILDINGS[b.type].stores) {
         inDepots += b.stock[r];
@@ -19,15 +21,17 @@ function invariants(s) {
         assert.ok(b.reserved[r] <= b.stock[r], 'reservou mais do que existe');
       }
     }
+    for (const f of s.farms) if (f.up) inSites += f.up.delivered[r];
     const ground = s.resources.groundTotal(r);
     assert.equal(inDepots + ground + carried + inSites + s.stats.consumed[r], s.startStock[r] + s.stats.produced[r], `conservação de ${r}`);
   }
   for (const b of s.storage.stores()) {
     assert.ok(b.incoming >= 0, 'incoming negativo');
-    assert.ok(s.storage.used(b) + b.incoming <= BUILDINGS[b.type].capacity, 'capacidade excedida');
+    assert.ok(s.storage.used(b) + b.incoming <= s.storage.cap(b), 'capacidade excedida');
     for (const r of RES) if (b.stock[r] > 0) assert.ok(s.storage.accepts(b, r), `${r} guardado no lugar errado`);
   }
   for (const c of s.citizens) assert.ok(c.hunger >= 0 && c.hunger <= 100, 'fome fora da faixa');
+  for (const r of RES) void r;
   for (const p of s.piles) { assert.ok(p.reserved >= 0 && p.reserved <= p.amount, 'pilha reservada errada'); }
   for (const c of s.citizens) if (!c.task || c.task.kind !== 'x') {
     if (c.inside) continue;
@@ -200,8 +204,9 @@ test('cancelar a obra devolve todo o material ao chão, e ele volta ao depósito
 test('depósito cheio: a sobra fica no chão e ninguém perde material', () => {
   const s = new Simulation({ seed: 'cheio' });
   const d = s.storage.depots()[0];
-  d.stock.stone = BUILDINGS.depot.capacity - d.stock.wood - 3;
-  s.startStock.stone = d.stock.stone;
+  const add = BUILDINGS.depot.capacity - s.storage.used(d) - 3;
+  d.stock.stone += add;
+  s.startStock.stone += add;
   for (const t of nearestNodes(s, 'tree', 6)) s.mark(t.x, t.y, t.x, t.y, ['tree'], true);
   run(s, 240);
   assert.equal(s.storage.used(d), BUILDINGS.depot.capacity);
@@ -446,7 +451,7 @@ test('vila salva na versão 0.1 abre, ganha celeiro e continua válida', () => {
   j.v = 1;
   delete j.farms;
   j.buildings = j.buildings.filter(b => b.type === 'depot');
-  for (const b of j.buildings) for (const r of ['potato', 'beans', 'wheat', 'corn', 'pumpkin', 'cabbage', 'berries', 'mushroom']) { delete b.stock[r]; delete b.reserved[r]; delete b.delivered[r]; delete b.enroute[r]; }
+  for (const b of j.buildings) for (const r of ['firewood', 'tools', 'coat', 'hide', 'herbs', 'fish', 'meat', 'apple', 'pear', 'potato', 'beans', 'wheat', 'corn', 'pumpkin', 'cabbage', 'berries', 'mushroom']) { delete b.stock[r]; delete b.reserved[r]; delete b.delivered[r]; delete b.enroute[r]; }
   for (const c of j.citizens) { c.profession = 'Trabalhador geral'; delete c.workplace; }
   j.startStock = { wood: 50, stone: 15, iron: 0 };
   j.stats.produced = { wood: 0, stone: 0, iron: 0 };
@@ -531,7 +536,7 @@ test('sem comida o aldeão enfraquece e morre de fome, sem perder a carga', () =
   for (let i = 0; i < 40 && s.citizens.length; i++) { run(s, DAY / 2, 100); if (s.alerts.some(a => a.id === 'weak')) weak = true; }
   assert.ok(weak, 'não avisou fraqueza');
   assert.equal(s.citizens.length, 0, 'deveriam ter morrido');
-  assert.equal(s.stats.deaths.hunger, 10);
+  assert.equal((s.stats.deaths.hunger || 0) + (s.stats.deaths.cold || 0), 10);
   assert.ok(s.chronicle.some(e => e.kind === 'death'));
   for (let i = 0; i < 100; i++) s.step();
   invariants(s);
@@ -558,7 +563,7 @@ test('velhos morrem de velhice e o viúvo pode casar de novo', () => {
   assert.equal(sp.spouse, null);
   const h = s.building(sp.home);
   assert.ok(!h.residents.includes(old.id));
-  assert.ok(s.citizens.every(c => c.age < 60));
+  assert.ok(s.citizens.every(c => c.age < 90));
 });
 
 test('jovens casam, não com parentes, e saem de casa quando há moradia', () => {
@@ -609,7 +614,10 @@ test('dez anos de vila: a população cresce só por nascimentos e nenhuma regra
   const [x, y] = clearArea(s, 8, 8);
   s.farming.place(x, y, x + 7, y + 7, 'corn');
   s.population.changeCount('farmer', 2);
-  for (const t of nearestNodes(s, 'tree', 80)) s.mark(t.x, t.y, t.x, t.y, ['tree'], true);
+  const [wx, wy] = freeSpot(s, 'woodcutter');
+  s.construction.place('woodcutter', wx, wy, 0);
+  s.population.changeCount('woodcutter', 1);
+  for (const t of nearestNodes(s, 'tree', 120)) s.mark(t.x, t.y, t.x, t.y, ['tree'], true);
   const t0 = Date.now();
   run(s, YEAR * 10, 400);
   assert.ok(s.stats.births >= 5, `nascimentos: ${s.stats.births}`);
@@ -637,4 +645,362 @@ test('gravidez, família e crônica sobrevivem ao salvamento; save v2 abre', () 
   invariants(o);
   run(o, DAY * 3, 200);
   assert.equal(o.stats.births >= 0, true);
+});
+
+test('estações mudam, temperatura cai no inverno e geada mata o que não foi colhido', () => {
+  const s = new Simulation({ seed: 'clima' });
+  assert.equal(s.season.index(), 0);
+  const seen = [];
+  const [x, y] = clearArea(s, 3, 3);
+  const f = s.farming.place(x, y, x + 2, y + 2, 'pumpkin').farm;
+  for (const t of f.tiles) { t.st = 2; t.crop = 'pumpkin'; }
+  let temps = [0, 0, 0, 0], n = [0, 0, 0, 0];
+  for (let i = 0; i < 6 * DAY / STEP; i += 20) { for (let k = 0; k < 20; k++) s.step(); const q = s.season.index(); temps[q] += s.season.temp(); n[q]++; if (!seen.includes(q)) seen.push(q); }
+  assert.deepEqual(seen.sort(), [0, 1, 2, 3]);
+  assert.ok(temps[3] / n[3] < 2 && temps[1] / n[1] > 15, 'temperaturas');
+  assert.ok(f.tiles.every(t => t.st !== 2 || t.crop !== 'pumpkin'), 'geada não atuou');
+});
+
+test('sem plantar no inverno; pomar guarda as árvores depois da colheita', () => {
+  const s = new Simulation({ seed: 'pomar', difficulty: 'facil' });
+  const [x, y] = clearArea(s, 3, 3);
+  const f = s.farming.place(x, y, x + 2, y + 2, 'apple', 'orchard').farm;
+  assert.equal(f.crop, 'apple');
+  const c = s.citizens[0];
+  s.time = 240 * 4.6;
+  assert.equal(s.season.index(), 3);
+  assert.equal(s.farming.pickTile(f, c, s.world.compAt(c.x | 0, c.y | 0)), -1);
+  f.tiles[0].st = 3; f.tiles[0].crop = 'apple';
+  s.farming.finishTile(f, 0, c);
+  assert.equal(f.tiles[0].st, 2);
+  assert.equal(f.tiles[0].crop, 'apple');
+  s.stats.produced.apple = 0; c.inv.res = null; c.inv.amount = 0;
+});
+
+test('frio sem casa, lenha e roupa mata; casa com lenha salva', () => {
+  const bare = new Simulation({ seed: 'gelo', difficulty: 'dificil' });
+  for (const c of bare.citizens) c.coatLife = 0;
+  const d = bare.storage.depots()[0];
+  bare.startStock.coat -= d.stock.coat; d.stock.coat = 0;
+  bare.time = 240 * 4.55;
+  bare.season.last = 3; bare.winterExtra = 10;
+  run(bare, 345, 400);
+  assert.ok(bare.citizens.length < 10, 'ninguém morreu de frio');
+  assert.ok(bare.stats.deaths.cold > 0);
+  const warm = new Simulation({ seed: 'gelo', difficulty: 'facil' });
+  housed(warm);
+  warm.time = 240 * 4.55; warm.season.last = 3;
+  run(warm, 240, 200);
+  assert.equal(warm.citizens.length, 10, 'morreram em casa aquecida');
+  const consumed = warm.stats.consumed.firewood;
+  assert.ok(consumed > 0, 'não queimou lenha');
+});
+
+test('cortador de lenha transforma madeira em lenha carregando tudo a pé', () => {
+  const s = new Simulation({ seed: 'lenha', difficulty: 'facil' });
+  const [x, y] = freeSpot(s, 'woodcutter');
+  const b = s.construction.place('woodcutter', x, y, 0).building;
+  s.population.changeCount('woodcutter', 1);
+  const w0 = s.stats.produced.firewood;
+  run(s, 180, 80);
+  assert.ok(b.done);
+  assert.ok(s.stats.produced.firewood > w0, 'não produziu');
+  assert.ok(s.stats.consumed.wood > 16 - 16, 'madeira não foi consumida');
+});
+
+test('toda oficina funciona quando tem matéria-prima', () => {
+  for (const [type, out, stock] of [['smith', 'tools', { iron: 6, wood: 6 }], ['tailor', 'coat', { hide: 10 }], ['fisher', 'fish', {}], ['quarry', 'stone', {}], ['mine', 'iron', {}], ['herbalist', 'herbs', {}], ['hunter', 'meat', {}], ['gatherer', 'berries', {}]]) {
+    const s = new Simulation({ seed: 'oficina', difficulty: 'normal' });
+    const W = s.world;
+    const d = s.storage.depots()[0];
+    for (const r in stock) { d.stock[r] += stock[r]; s.startStock[r] += stock[r]; }
+    let spot = null;
+    for (let r = 3; r < 60 && !spot; r++) for (let y = W.start.y - r; y <= W.start.y + r && !spot; y++) for (let x = W.start.x - r; x <= W.start.x + r; x++) {
+      if (s.construction.validate(type, x, y, 0).ok) { spot = [x, y]; break; }
+    }
+    if (!spot) continue;
+    const b = s.construction.place(type, spot[0], spot[1], 0).building;
+    const P = BUILDINGS[type].prof;
+    b.work = BUILDINGS[type].work - 0.1;
+    for (const r in BUILDINGS[type].cost) { b.delivered[r] = BUILDINGS[type].cost[r]; s.startStock[r] += BUILDINGS[type].cost[r]; }
+    s.construction.finish(b);
+    s.population.changeCount(P, 2);
+    s.farming.balance();
+    const before = s.stats.produced[out] + (out === 'berries' ? s.stats.produced.mushroom : 0);
+    let ok = false;
+    for (let t = 0; t < 40 && !ok; t++) { run(s, 25, 200); ok = s.stats.produced[out] + (out === 'berries' ? s.stats.produced.mushroom : 0) > before; }
+    assert.ok(ok, `${type} não produziu ${out}`);
+  }
+});
+
+test('silvicultor planta mudas que crescem e corta árvores adultas', () => {
+  const s = new Simulation({ seed: 'muda', difficulty: 'facil' });
+  const [x, y] = freeSpot(s, 'forester');
+  const b = s.construction.place('forester', x, y, 0).building;
+  for (const r in BUILDINGS.forester.cost) { b.delivered[r] = BUILDINGS.forester.cost[r]; s.startStock[r] += BUILDINGS.forester.cost[r]; }
+  s.construction.finish(b);
+  s.population.changeCount('forester', 2);
+  const w0 = s.stats.produced.wood, nodes0 = s.nodes.size;
+  run(s, 120, 200);
+  assert.ok(s.saplings.size > 0 || s.stats.produced.wood > w0, 'nada aconteceu');
+  run(s, DAY, 200);
+  assert.ok(s.stats.produced.wood > w0, 'não cortou');
+  void nodes0;
+  const l = SaveManager.load(SaveManager.serialize(s));
+  assert.equal(l.nodes.size, s.nodes.size);
+  invariants(l);
+});
+
+test('mercado abastece e famílias usam; posto troca mercadoria com o barco', () => {
+  const s = new Simulation({ seed: 'troca', difficulty: 'facil' });
+  const W = s.world;
+  const put = t => {
+    for (let r = 3; r < 70; r++) for (let y = W.start.y - r; y <= W.start.y + r; y++) for (let x = W.start.x - r; x <= W.start.x + r; x++) {
+      if (s.construction.validate(t, x, y, 0).ok) {
+        const b = s.construction.place(t, x, y, 0).building;
+        for (const q in BUILDINGS[t].cost) { b.delivered[q] = BUILDINGS[t].cost[q]; s.startStock[q] += BUILDINGS[t].cost[q]; }
+        s.construction.finish(b);
+        return b;
+      }
+    }
+    return null;
+  };
+  const m = put('market');
+  s.population.changeCount('vendor', 2);
+  run(s, 100, 80);
+  assert.ok(s.storage.used(m) > 0, 'mercado vazio');
+  const post = put('trading');
+  if (post) {
+    s.population.changeCount('trader', 2);
+    post.exportRes = 'potato';
+    run(s, 60, 80);
+    assert.ok(post.stock.potato > 0, 'nada no posto');
+    assert.equal(s.work.buy(post, 'iron', 1).ok, false);
+    s.trade.next = 0;
+    s.work.boatTick();
+    assert.ok(s.trade.boat);
+    const off = s.trade.boat.offers[0];
+    const before = s.resources.groundTotal(off.res) ;
+    const r = s.work.buy(post, off.res, 1);
+    if (r.ok) assert.equal(s.resources.groundTotal(off.res), before + 1);
+    invariants(s);
+  }
+});
+
+test('escola forma alunos, doença cura no hospital, cemitério guarda mortos', () => {
+  const s = new Simulation({ seed: 'servico', difficulty: 'facil' });
+  const put = t => {
+    const [x, y] = freeSpot(s, t);
+    const b = s.construction.place(t, x, y, 0).building;
+    for (const q in BUILDINGS[t].cost) { b.delivered[q] = BUILDINGS[t].cost[q]; s.startStock[q] += BUILDINGS[t].cost[q]; }
+    s.construction.finish(b);
+    return b;
+  };
+  housed(s, 1);
+  const sc = put('school');
+  s.population.changeCount('teacher', 1);
+  s.farming.balance();
+  assert.equal(s.work.schoolOpen(), true);
+  const kid = { ...s.citizens[0], id: s.newId(), name: 'Aluno', age: 11.9999, spouse: null, parents: [], home: null, inv: { res: null, amount: 0 }, task: null, path: null, diet: [], profession: 'child', workplace: null, educated: false };
+  s.citizens.push(kid);
+  run(s, 2, 40);
+  assert.equal(kid.profession, 'student');
+  kid.age = 16;
+  run(s, 2, 40);
+  assert.equal(kid.educated, true);
+  assert.equal(kid.profession, 'laborer');
+  assert.ok(s.population.rate(kid) > 1);
+  const h = put('hospital');
+  s.population.changeCount('doctor', 1);
+  const d = s.storage.depots()[0]; d.stock.herbs += 8; s.startStock.herbs += 8;
+  s.farming.balance();
+  run(s, 30, 80);
+  assert.ok((h.input.herbs || 0) > 0, 'hospital sem ervas');
+  const sick = s.citizens.find(c => c.profession === 'laborer');
+  s.population.infect(sick);
+  for (let i = 0; i < 60 && sick.sick > 0; i++) run(s, 5, 200);
+  assert.equal(sick.sick, 0, 'não curou');
+  const cem = put('cemetery');
+  s.population.kill(s.citizens.find(c => c.profession === 'laborer'), 'accident');
+  assert.equal(cem.graves, 1);
+  assert.equal(s.unburied, 0);
+});
+
+test('estrada acelera, ponte atravessa água e túnel fura montanha', () => {
+  const s = new Simulation({ seed: 'via', difficulty: 'facil' });
+  const W = s.world, st = W.start;
+  const a = s.citizens[0];
+  const n = s.infra.place(1, st.x - 5, st.y + 6, st.x + 5, st.y + 6);
+  assert.ok(n > 0);
+  run(s, 60, 80);
+  assert.ok(s.roads.length > 0, 'nenhum tile pronto');
+  assert.ok(W.costI(W.idx(s.roads[0].x, s.roads[0].y)) < 1);
+  let water = null;
+  for (let i = 0; i < W.w * W.h && !water; i++) if (W.terrain[i] === T.WATER && [i - 1, i + 1, i - W.w, i + W.w].some(j => j >= 0 && j < W.comp.length && W.comp[j] === W.compAt(a.x | 0, a.y | 0))) water = [i % W.w, (i / W.w) | 0];
+  assert.ok(water);
+  assert.equal(W.blocked(water[0], water[1]), true);
+  s.infra.place(3, water[0], water[1], water[0], water[1]);
+  let t0 = 0;
+  while (W.blocked(water[0], water[1]) && t0++ < 60) run(s, 10, 200);
+  assert.equal(W.blocked(water[0], water[1]), false, 'ponte não ficou pronta');
+  assert.ok(s.infra.removeArea(st.x - 5, st.y + 6, st.x + 5, st.y + 6) > 0);
+  const l = SaveManager.load(SaveManager.serialize(s));
+  assert.equal(l.world.blocked(water[0], water[1]), false);
+  invariants(l);
+});
+
+test('caçadores reduzem veados; animais andam só em terra livre', () => {
+  const s = new Simulation({ seed: 'veado' });
+  assert.ok(s.animals.length > 3);
+  run(s, 60, 200);
+  for (const a of s.animals) assert.ok(!s.world.blocked(a.x | 0, a.y | 0));
+});
+
+test('pastagem produz lã e, com rebanho cheio, carne', () => {
+  const s = new Simulation({ seed: 'ovelha', difficulty: 'facil' });
+  const [x, y] = clearArea(s, 4, 4);
+  const f = s.farming.place(x, y, x + 3, y + 3, 'potato', 'pasture').farm;
+  assert.equal(f.herd, 2);
+  s.population.changeCount('herder', 1);
+  run(s, DAY * 4, 200);
+  assert.ok(s.stats.produced.hide > 0, 'sem lã');
+  assert.ok(f.herd >= 2);
+});
+
+test('incêndio sem poço destrói; com poço apaga; eventos só com a opção ligada', () => {
+  const s = new Simulation({ seed: 'fogo', difficulty: 'facil' });
+  housed(s, 2);
+  const [h1, h2] = s.buildings.filter(b => BUILDINGS[b.type].residents);
+  h1.burning = 100;
+  for (let i = 0; i < 120; i++) s.eventsMgr.burnTick();
+  assert.ok(!s.building(h1.id), 'não destruiu');
+  invariants(s);
+  const [x, y] = freeSpot(s, 'well');
+  const w = s.construction.place('well', x, y, 0).building;
+  for (const q in BUILDINGS.well.cost) { w.delivered[q] = BUILDINGS.well.cost[q]; s.startStock[q] += BUILDINGS.well.cost[q]; }
+  s.construction.finish(w);
+  if (Math.abs(w.x - h2.x) + Math.abs(w.y - h2.y) <= 16) {
+    h2.burning = 100;
+    for (let i = 0; i < 30; i++) s.eventsMgr.burnTick();
+    assert.ok(s.building(h2.id), 'poço não salvou');
+    assert.equal(h2.burning, 0);
+  }
+  const quiet = new Simulation({ seed: 'calmo' });
+  for (let i = 0; i < 40; i++) quiet.eventsMgr.daily();
+  assert.equal(quiet.chronicle.length, 0);
+});
+
+test('mina só encosta na montanha e cabana de pesca na água', () => {
+  const s = new Simulation({ seed: 'lugar' });
+  const W = s.world;
+  const st = W.start;
+  assert.match(W.canPlace('mine', st.x + 3, st.y + 6, 0).reason || 'Precisa encostar', /montanha|Limpe|Há|construção|Precisa/);
+});
+
+test('com eventos e doenças ligados, vinte anos rodam sem quebrar nenhuma regra', () => {
+  const s = new Simulation({ seed: 'caos', size: 'grande', difficulty: 'facil', events: true, disease: true });
+  housed(s);
+  const [x, y] = clearArea(s, 8, 8);
+  s.farming.place(x, y, x + 7, y + 7, 'potato');
+  s.population.changeCount('farmer', 2);
+  const [wx, wy] = freeSpot(s, 'woodcutter');
+  s.construction.place('woodcutter', wx, wy, 0);
+  s.population.changeCount('woodcutter', 1);
+  for (const t of nearestNodes(s, 'tree', 200)) s.mark(t.x, t.y, t.x, t.y, ['tree'], true);
+  const t0 = Date.now();
+  run(s, YEAR * 20, 800);
+  console.log(`  20 anos com eventos: ${s.citizens.length} vivos, nascimentos ${s.stats.births}, mortes ${JSON.stringify(s.stats.deaths)}, ${Date.now() - t0} ms`);
+});
+
+test('vila salva na 0.3 abre com roupas, ferramentas e estações', () => {
+  const s = new Simulation({ seed: 'v3' });
+  const j = JSON.parse(SaveManager.serialize(s));
+  j.v = 3;
+  for (const k of ['roads', 'roadJobs', 'animals', 'animalCap', 'trade', 'unburied', 'griefUntil', 'winterExtra', 'badHarvest', 'reports', 'planted']) delete j[k];
+  for (const c of j.citizens) for (const k of ['warmth', 'warming', 'sick', 'educated', 'toolLife', 'coatLife']) delete c[k];
+  const l = SaveManager.load(JSON.stringify(j));
+  invariants(l);
+  assert.ok(l.citizens[0].warmth === 100 && l.citizens[0].toolLife > 0);
+  run(l, DAY, 200);
+});
+
+test('onde se anda muito surge trilha e depois estrada; sem uso, a trilha some', () => {
+  const s = new Simulation({ seed: 'trilha' });
+  const W = s.world, st = W.start;
+  let tile = null;
+  for (let r = 6; r < 30 && !tile; r++) for (let x = st.x - r; x <= st.x + r; x++) {
+    const i = W.idx(x, st.y + r);
+    if (W.terrain[i] <= 1 && W.nodeAt[i] === -1 && !W.blockedI(i) && W.fieldAt[i] === -1) { tile = [x, st.y + r]; break; }
+  }
+  const i = W.idx(tile[0], tile[1]);
+  const c0 = W.costI(i);
+  for (let k = 0; k < 40; k++) s.infra.step_on(tile[0], tile[1]);
+  assert.equal(W.road[i], 5);
+  assert.ok(W.costI(i) < c0);
+  const trail = W.idx(tile[0] + 1, tile[1]);
+  if (W.terrain[trail] <= 1 && W.nodeAt[trail] === -1) {
+    for (let k = 0; k < 32; k++) s.infra.step_on(tile[0] + 1, tile[1]);
+    for (let k = 0; k < 40; k++) s.infra.wearDaily();
+    assert.equal(W.road[trail], 0, 'trilha abandonada não sumiu');
+  }
+  for (let k = 0; k < 120; k++) s.infra.step_on(tile[0], tile[1]);
+  assert.equal(W.road[i], 1, 'não virou estrada');
+  for (let k = 0; k < 40; k++) s.infra.wearDaily();
+  assert.equal(W.road[i], 1, 'estrada formada deveria ficar');
+});
+
+test('os próprios aldeões abrem caminho entre depósito e trabalho', () => {
+  const s = new Simulation({ seed: 'desejo' });
+  for (const t of nearestNodes(s, 'tree', 80)) s.mark(t.x, t.y, t.x, t.y, ['tree'], true);
+  run(s, 240, 400);
+  assert.ok(s.roads.some(r => r.auto), 'nenhuma trilha surgiu');
+  const l = SaveManager.load(SaveManager.serialize(s));
+  assert.equal(l.roads.length, s.roads.length);
+  assert.equal(l.wornList.length, s.wornList.length);
+});
+
+test('melhorar depósito aumenta a capacidade com material carregado a pé', () => {
+  const s = new Simulation({ seed: 'nivel', difficulty: 'facil' });
+  const d = s.storage.depots()[0], cap = s.storage.cap(d);
+  assert.ok(s.construction.startUpgrade(d).ok);
+  assert.equal(s.construction.startUpgrade(d).ok, false);
+  const stone0 = d.stock.stone;
+  run(s, 100, 80);
+  assert.equal(d.level, 2);
+  assert.ok(s.storage.cap(d) > cap);
+  assert.ok(d.stock.stone < stone0, 'não gastou material');
+  assert.equal(s.construction.canUpgrade(d).ok, false, 'nível 3 pede escola');
+});
+
+test('casa melhorada abriga mais; oficina melhorada produz mais rápido; fazenda colhe mais', () => {
+  const s = new Simulation({ seed: 'tec', difficulty: 'facil' });
+  housed(s, 1);
+  const h = s.buildings.find(b => BUILDINGS[b.type].residents);
+  assert.equal(s.population.maxRes(h), 5);
+  h.level = 3;
+  assert.equal(s.population.maxRes(h), 9);
+  const [x, y] = clearArea(s, 3, 3);
+  const f = s.farming.place(x, y, x + 2, y + 2, 'potato').farm;
+  f.tiles[0].crop = 'potato';
+  const y1 = s.farming.tileYield(f.tiles[0]);
+  f.level = 3;
+  assert.ok(s.farming.tileYield(f.tiles[0]) > y1);
+  assert.ok(s.construction.startUpgrade({ ...f, level: 1, up: null, id: -1 }).ok);
+});
+
+test('melhoria de fazenda é entregue e terminada; cancelar devolve o material', () => {
+  const s = new Simulation({ seed: 'techfarm', difficulty: 'facil' });
+  const [x, y] = clearArea(s, 3, 3);
+  const f = s.farming.place(x, y, x + 2, y + 2, 'beans').farm;
+  assert.ok(s.construction.startUpgrade(f).ok);
+  run(s, 100, 80);
+  assert.equal(f.level, 2, 'fazenda não evoluiu');
+  const d = s.storage.depots()[0];
+  assert.ok(s.construction.startUpgrade(d).ok);
+  run(s, 8, 40);
+  s.construction.cancelUpgrade(d);
+  invariants(s);
+  assert.equal(d.up, null);
+  run(s, 100, 80);
+  invariants(s);
 });

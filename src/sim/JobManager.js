@@ -10,22 +10,25 @@ export class JobManager {
     const comp = W.compAt(c.x | 0, c.y | 0);
     if (c.inv.res) {
       if (!S.isNight() && (this._farmNext(c, comp) || this._forage(c, comp))) return true;
+      if (c.task) return true;
       return this._cargo(c, comp);
     }
     if (S.isNight()) return this._rest(c);
-    if (S.population.isChild(c)) return this._eat(c, comp) || this._idle(c);
-    return this._eat(c, comp) || this._fetch(c, comp)
+    if (S.population.isChild(c)) return this._warmUp(c) || this._cure(c, comp) || this._eat(c, comp) || this._idle(c);
+    if (c.profession === 'student') return this._warmUp(c) || this._eat(c, comp) || S.work.study(c, comp) || this._idle(c);
+    return this._warmUp(c) || this._cure(c, comp) || this._eat(c, comp) || this._fetch(c, comp) || this._equip(c, comp)
+      || S.work.assign(c, comp)
       || (c.profession === 'builder' && this._build(c, comp))
       || (c.profession === 'farmer' && this._farmNext(c, comp))
-      || (c.profession === 'gatherer' && this._forage(c, comp))
-      || this._supply(c, comp) || this._haul(c, comp) || this._harvest(c, comp) || this._idle(c);
+      || ((c.profession === 'gatherer' || c.profession === 'herbalist') && this._forage(c, comp))
+      || this._supply(c, comp) || S.infra.assign(c, comp) || this._haul(c, comp) || this._harvest(c, comp) || this._idle(c);
   }
 
   // Comer em casa se houver despensa; sem isso, come direto no celeiro.
   _eat(c, comp) {
     if (c.hunger < HUNGRY) return false;
     const S = this.sim, home = c.home != null ? S.building(c.home) : null;
-    if (home && home.done && S.population.pantryTotal(home) > 0) {
+    if (home && home.done && S.population.foodIn(home) > 0) {
       c.task = { kind: 'eat', buildingId: home.id };
       return true;
     }
@@ -36,18 +39,52 @@ export class JobManager {
     c.task = { kind: 'eatBarn', depotId: d.id, res };
     return true;
   }
-  // Um morador por vez busca comida para abastecer a casa.
+  // Com frio demais, volta para casa para se aquecer.
+  _warmUp(c) {
+    const S = this.sim;
+    if (c.warmth > 30 || c.home == null) return false;
+    const h = S.building(c.home);
+    if (!h || !h.done || S.season.temp() > 8) return false;
+    c.task = { kind: 'warm', buildingId: h.id };
+    return true;
+  }
+  _cure(c, comp) {
+    if (c.sick <= 0) return false;
+    const S = this.sim;
+    const h = S.buildings.find(b => b.done && b.type === 'hospital' && (b.input?.herbs || 0) - (b.resv || 0) > 0 && S.farming.workers(b) > 0 && S.world.compAt(b.door.x, b.door.y) === comp);
+    if (!h) return false;
+    h.resv = (h.resv || 0) + 1;
+    c.task = { kind: 'cure', buildingId: h.id };
+    return true;
+  }
+  // Um morador por vez abastece a casa com comida e, antes do frio, com lenha.
   _fetch(c, comp) {
     const S = this.sim, home = c.home != null ? S.building(c.home) : null;
-    if (!home || !home.done || home.fetching != null || S.population.pantryTotal(home) >= PANTRY_LOW) return false;
+    if (!home || !home.done || home.fetching != null) return false;
     if (S.world.compAt(home.door.x, home.door.y) !== comp) return false;
-    const d = S.storage.nearestFood(home.door.x, home.door.y, comp);
-    if (!d) return false;
-    const res = S.storage.bestFood(d);
-    const n = Math.min(PANTRY_TRIP, S.storage.available(d, res));
+    const P = S.population;
+    let d = null, res = null;
+    if (P.foodIn(home) < PANTRY_LOW && (d = S.storage.nearestFood(home.door.x, home.door.y, comp))) res = S.storage.bestFood(d);
+    if (!res && (home.pantry.firewood || 0) < 5) {
+      d = S.storage.nearestWith(home.door.x, home.door.y, comp, 'firewood');
+      if (d) res = 'firewood';
+    }
+    if (!res) return false;
+    const n = Math.min(res === 'firewood' ? 5 : PANTRY_TRIP, S.storage.available(d, res));
     d.reserved[res] += n;
     home.fetching = c.id;
     c.task = { kind: 'fetch', depotId: d.id, buildingId: home.id, res, n, step: 0 };
+    return true;
+  }
+  // Ferramenta gasta ou roupa rasgada: pega outra no estoque.
+  _equip(c, comp) {
+    const S = this.sim;
+    const res = c.toolLife <= 0 ? 'tools' : c.coatLife <= 0 && S.season.index() >= 2 ? 'coat' : null;
+    if (!res) return false;
+    const d = S.storage.nearestWith(c.x, c.y, comp, res);
+    if (!d) return false;
+    d.reserved[res]++;
+    c.task = { kind: 'equip', depotId: d.id, res };
     return true;
   }
   _farmNext(c, comp) {
@@ -61,7 +98,8 @@ export class JobManager {
     return true;
   }
   _forage(c, comp) {
-    if (c.profession !== 'gatherer' || c.workplace == null) return false;
+    if ((c.profession !== 'gatherer' && c.profession !== 'herbalist') || c.workplace == null) return false;
+    if (this.sim.season.index() === 3) return false;
     if (c.inv.res && c.inv.amount + 2 > CARRY[c.inv.res]) return false;
     const S = this.sim, hut = S.building(c.workplace);
     if (!hut || !hut.done) return false;
@@ -96,16 +134,17 @@ export class JobManager {
     c.task = { kind: 'camp' };
     return true;
   }
-  _sites() { return this.sim.buildings.filter(b => !b.done); }
+  _sites() { const C = this.sim.construction; return [...this.sim.buildings, ...this.sim.farms].filter(b => C.proj(b)); }
 
   _build(c, comp) {
     const S = this.sim;
     for (const b of this._sites()) {
       if (b.cooldown > S.time || !S.construction.materialsComplete(b)) continue;
-      if (b.builders.length >= BUILDINGS[b.type].builders) continue;
+      const pj = S.construction.proj(b);
+      if (pj.builders.length >= (BUILDINGS[b.type]?.builders ?? 3)) continue;
       const spots = this.reachable(this.ring(b), comp);
       if (!spots.length) continue;
-      b.builders.push(c.id);
+      pj.builders.push(c.id);
       c.task = { kind: 'build', siteId: b.id, spot: spots[(c.id * 3 + b.id) % spots.length] };
       return true;
     }
@@ -122,7 +161,7 @@ export class JobManager {
         if (!src) continue;
         const n = Math.min(CARRY[res], need, src.avail);
         if (src.type === 'depot') src.ref.reserved[res] += n; else src.ref.reserved += n;
-        b.enroute[res] += n;
+        S.construction.proj(b).enroute[res] += n;
         c.task = { kind: 'deliver', srcType: src.type, srcId: src.ref.id, siteId: b.id, res, n, step: 0 };
         return true;
       }
@@ -199,8 +238,8 @@ export class JobManager {
         break;
       }
       case 'deliver': {
-        const b = S.building(t.siteId);
-        if (b && !b.done) b.enroute[t.res] -= t.n;
+        const pj = S.construction.proj(S.building(t.siteId));
+        if (pj) pj.enroute[t.res] -= t.n;
         if (t.step === 0) {
           if (t.srcType === 'depot') { const d = S.building(t.srcId); if (d && d.done) d.reserved[t.res] -= t.n; }
           else { const p = S.resources.pile(t.srcId); if (p) p.reserved -= t.n; }
@@ -208,11 +247,21 @@ export class JobManager {
         break;
       }
       case 'build': {
-        const b = S.building(t.siteId);
-        if (b && !b.done) b.builders = b.builders.filter(id => id !== c.id);
+        const pj = S.construction.proj(S.building(t.siteId));
+        if (pj) pj.builders = pj.builders.filter(id => id !== c.id);
         break;
       }
       case 'harvest': { const n = S.nodes.get(t.nodeId); if (n) n.reservedBy = null; break; }
+      case 'equip': { const d = S.building(t.depotId); if (d && d.done) d.reserved[t.res]--; break; }
+      case 'cure': { const h = S.building(t.buildingId); if (h) h.resv = Math.max(0, (h.resv || 0) - 1); break; }
+      case 'craftFetch': case 'vend': case 'export': {
+        const d = S.building(t.depotId), to = S.building(t.toId);
+        if (t.kind !== 'craftFetch' && to && to.done) to.incoming -= t.n;
+        if (t.step === 0 && d && d.done) d.reserved[t.res] -= t.n;
+        break;
+      }
+      case 'road': S.infra.release(t); break;
+      case 'plant': { const k = S.world; void k; break; }
       case 'eatBarn': { const d = S.building(t.depotId); if (d && d.done) d.reserved[t.res]--; break; }
       case 'fetch': {
         const h = S.building(t.buildingId);
@@ -247,6 +296,19 @@ export class JobManager {
       case 'haul': return t.step === 0 ? `Indo recolher ${low(t.res)}` : `Levando ${low(t.res)} para guardar`;
       case 'harvest': { const n = S.nodes.get(t.nodeId); return n ? ({ tree: 'Cortando árvore', stone: 'Quebrando pedra', iron: 'Extraindo ferro' })[n.type] : 'Coletando'; }
       case 'idle': return 'Sem tarefa, aguardando';
+      case 'warm': return 'Voltando para se aquecer';
+      case 'cure': return 'Indo ao hospital';
+      case 'equip': return `Buscando ${low(t.res)}`;
+      case 'craft': return `Produzindo ${low(BUILDINGS[S.building(t.buildingId)?.type]?.recipe?.out)}`;
+      case 'craftFetch': return `Buscando ${low(t.res)} para a oficina`;
+      case 'staff': return ({ teacher: 'Dando aula', doctor: 'Atendendo no hospital' })[c.profession] || 'Trabalhando';
+      case 'study': return 'Estudando na escola';
+      case 'vend': return `Levando ${low(t.res)} ao mercado`;
+      case 'export': return `Levando ${low(t.res)} ao posto`;
+      case 'hunt': return 'Caçando';
+      case 'herd': return 'Cuidando dos animais';
+      case 'plant': return 'Plantando uma muda';
+      case 'road': return ({ 1: 'Abrindo estrada', 2: 'Calçando estrada', 3: 'Construindo ponte', 4: 'Abrindo túnel' })[t.k];
       case 'eat': return 'Indo comer em casa';
       case 'eatBarn': return 'Indo comer no celeiro';
       case 'fetch': return t.step === 0 ? `Buscando ${low(t.res)} no celeiro` : 'Levando comida para casa';

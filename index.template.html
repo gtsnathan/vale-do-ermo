@@ -74,8 +74,12 @@ button, select, input { font: inherit; color: inherit; }
 .sep { flex: none; width: 2px; background: var(--wood); margin: 3px; }
 :focus-visible { outline: 2px solid var(--straw); outline-offset: 1px; }
 
-#drawer { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; padding: 4px; pointer-events: auto; max-width: 100%; }
-.dr { display: flex; align-items: center; gap: 7px; width: 182px; padding: 5px 7px; background: var(--peat2); border: 1px solid var(--wood); text-align: left; cursor: pointer; }
+#drawer { display: block; width: min(600px, 100%); max-height: 48vh; overflow-y: auto; padding: 4px 8px 8px; pointer-events: auto; touch-action: pan-y; }
+#drawer h4 { margin: 6px 0 3px; font: 700 14px var(--display); color: var(--straw); }
+.dg { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 3px; }
+#inspect h5 { margin: 8px 0 2px; font: 700 14px var(--display); color: var(--straw); }
+.bar.warm i { background: var(--ice); }
+.dr { display: flex; align-items: center; gap: 7px; padding: 5px 7px; min-width: 0; background: var(--peat2); border: 1px solid var(--wood); text-align: left; cursor: pointer; }
 .dr:hover { background: var(--wood); }
 .dr span { display: flex; flex-direction: column; min-width: 0; line-height: 1.1; }
 .dr em { font-style: normal; font-size: 13px; color: var(--ash); }
@@ -144,7 +148,9 @@ button, select, input { font: inherit; color: inherit; }
 .f { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .f label { display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--ash); min-width: 0; }
 .f .wide { grid-column: 1 / -1; }
-.f select, .f input { width: 100%; height: 38px; padding: 0 8px; background: #12100e; border: 1px solid var(--wood); color: var(--bone); font-size: 15px; user-select: text; -webkit-user-select: text; }
+.f .chk { flex-direction: row; align-items: center; gap: 8px; color: var(--bone); font-size: 14px; }
+.f .chk input { width: 18px; height: 18px; flex: none; }
+.f select, .f input:not([type=checkbox]) { width: 100%; height: 38px; padding: 0 8px; background: #12100e; border: 1px solid var(--wood); color: var(--bone); font-size: 15px; user-select: text; -webkit-user-select: text; }
 .seed { display: flex; gap: 4px; }
 .seed input { flex: 1; min-width: 0; }
 .seed button { flex: none; height: 38px; padding: 0 10px; background: var(--peat2); border: 1px solid var(--wood); cursor: pointer; }
@@ -168,7 +174,8 @@ button, select, input { font: inherit; color: inherit; }
   #inspect { top: auto; bottom: 88px; right: 8px; left: 8px; width: auto; max-height: 42vh; }
   #people { left: 8px; right: 8px; width: auto; bottom: 88px; }
   #manage { left: 8px; right: 8px; width: auto; top: auto; bottom: 88px; max-height: 66vh; }
-  .dr { width: calc(50% - 2px); }
+  .dg { grid-template-columns: 1fr 1fr; }
+  .dr .ic { width: 18px; height: 18px; }
   #toast { bottom: auto; top: calc(98px + env(safe-area-inset-top, 0px)); }
   #inspect .note { display: none; }
   #menu { align-items: flex-end; padding-left: max(10px, env(safe-area-inset-left, 0px)); padding-right: max(10px, env(safe-area-inset-right, 0px)); }
@@ -222,10 +229,11 @@ button, select, input { font: inherit; color: inherit; }
   <div id="card">
     <h1>Vale do Ermo</h1>
     <p id="m-end" hidden></p>
-    <p>Dez aldeões, comida para poucos dias e um vale sem dono. Você decide o que erguer e o que plantar. Eles carregam cada tora, criam os filhos e enterram os velhos.</p>
+    <p>Dez aldeões, comida para poucos dias e um vale sem dono. Você decide o que erguer e o que plantar. Eles carregam cada tora, abrem os próprios caminhos e tentam atravessar o inverno.</p>
     <div class="f">
       <label>Tamanho do mapa<select id="m-size"></select></label>
       <label>Dificuldade<select id="m-diff"></select></label>
+      <label class="wide chk"><input type="checkbox" id="m-dis" checked> Incêndios, tempestades, pragas e acidentes</label>
       <label class="wide">Semente do mapa
         <span class="seed"><input id="m-seed" autocomplete="off" aria-label="Semente do mapa"><button id="m-dice" title="Sortear outra semente">Sortear</button></span>
       </label>

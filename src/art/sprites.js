@@ -82,6 +82,33 @@ function birch(v) {
   blob(p, offs.map(([x, y, r], i) => [24 + x + (hash(i, v, 5) - 0.5) * 3, y, r]), BIRCH, s);
   return p.outline(0x20280f, 120);
 }
+// Inverno: pinheiro com neve nas partes de cima e copas sem folhas.
+function snowPine(src) {
+  const p = new Pix(src.w, src.h, src.ox, src.oy);
+  p.d.set(src.d);
+  for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) {
+    const i = (y * p.w + x) * 4;
+    if (p.d[i + 3] < 200) continue;
+    const g = p.d[i + 1], lit = g > 75;
+    if (lit && hash(x, y, 8) > 0.2) { const c = g > 100 ? 255 : 226; p.d[i] = c; p.d[i + 1] = c; p.d[i + 2] = Math.min(255, c + 8); }
+  }
+  return p;
+}
+function bareTree(v, birchy) {
+  const p = new Pix(64, 76, 32, 70), bark = birchy ? 0xcfcabb : 0x4a3628;
+  groundShadow(p, 32, 69, 14, 4);
+  for (let y = 0; y < (birchy ? 44 : 30); y++) for (let x = -1; x <= 1; x++) p.set(32 + x, 70 - y, x > 0 ? shade(bark, 0.7) : bark);
+  const branch = (x0, y0, a, len, d) => {
+    if (d === 0 || len < 2) return;
+    const x1 = x0 + Math.cos(a) * len, y1 = y0 + Math.sin(a) * len;
+    p.line(x0, y0, x1, y1, d > 2 ? bark : 0x3c2d22);
+    if (d <= 2 && hash(x1 | 0, y1 | 0, 9) > 0.45) p.set(x1, y1 - 1, 0xf2f5f8);
+    branch(x1, y1, a - 0.45 - hash(d, v, 1) * 0.3, len * 0.72, d - 1);
+    branch(x1, y1, a + 0.4 + hash(d, v, 2) * 0.3, len * 0.72, d - 1);
+  };
+  branch(32, birchy ? 28 : 42, -Math.PI / 2, birchy ? 10 : 12, 5);
+  return p.outline(0x1a1411, 90);
+}
 export function stump(kind) {
   const p = new Pix(24, 16, 12, 12);
   p.ellipse(13, 12, 9, 3, SHADOW, 60);
@@ -323,7 +350,37 @@ const mossThatch = (light, seed) => (s, t, u, v, x, y) => {
   const base = n > 0.7 ? 0x7c8a4a : n > 0.3 ? 0x687a3d : 0x566631;
   return shade(v % 4 < 1 ? shade(base, 0.7) : base, light);
 };
+const stoneWall = (light, seed) => (s, t, u, v, x, y) => {
+  const row = Math.floor(v / 5), n = hash(Math.floor((u + row * 5) / 9), row, seed);
+  let c = n > 0.66 ? 0x8d8a82 : n > 0.3 ? 0x7c7971 : 0x6c6962;
+  if (v % 5 < 1 || (u + row * 5) % 9 < 1) c = 0x4c4a45;
+  return shade(c, light);
+};
+const plaster = (light, seed) => (s, t, u, v, x, y) => {
+  const n = hash(x >> 1, y >> 1, seed);
+  let c = n > 0.8 ? 0xd2c7ad : 0xe2d8c1;
+  if (u % 28 < 2 || v < 2) c = 0x5a4230;
+  return shade(c, light);
+};
+const redTile = (light, seed) => (s, t, u, v) => {
+  const row = Math.floor(v / 5), n = hash(Math.floor((u + row * 4) / 7), row, seed);
+  const base = n > 0.6 ? 0xa8533a : n > 0.3 ? 0x96472f : 0x843d29;
+  return shade(v % 5 < 1 ? shade(base, 0.65) : base, light);
+};
 const STYLES = {
+  stonehouse: { T: 2, ox: 80, oy: 98, W: 160, Hh: 176, H: 30, R: 30, wall: stoneWall, roof: shingle, doorW: 11, doorH: 21, chimney: true, win: true },
+  woodcutter: { T: 2, ox: 80, oy: 90, W: 160, Hh: 168, H: 22, R: 22, wall: logWall, roof: shingle, doorW: 14, doorH: 17 },
+  forester: { T: 2, ox: 80, oy: 90, W: 160, Hh: 168, H: 22, R: 26, wall: logWall, roof: mossThatch, doorW: 12, doorH: 17, win: true },
+  fisher: { T: 2, ox: 80, oy: 90, W: 160, Hh: 168, H: 22, R: 22, wall: planks, roof: thatch, doorW: 12, doorH: 17 },
+  hunter: { T: 2, ox: 80, oy: 90, W: 160, Hh: 168, H: 22, R: 26, wall: logWall, roof: thatch, doorW: 12, doorH: 17 },
+  herbalist: { T: 2, ox: 80, oy: 90, W: 160, Hh: 168, H: 22, R: 24, wall: plaster, roof: mossThatch, doorW: 12, doorH: 17, win: true },
+  smith: { T: 2, ox: 80, oy: 98, W: 160, Hh: 176, H: 26, R: 24, wall: stoneWall, roof: shingle, doorW: 16, doorH: 20, chimney: true },
+  tailor: { T: 2, ox: 80, oy: 98, W: 160, Hh: 176, H: 28, R: 26, wall: plaster, roof: thatch, doorW: 11, doorH: 20, win: true },
+  school: { T: 3, ox: 112, oy: 122, W: 224, Hh: 236, H: 36, R: 32, wall: plaster, roof: redTile, doorW: 16, doorH: 24, win: true },
+  hospital: { T: 3, ox: 112, oy: 122, W: 224, Hh: 236, H: 36, R: 30, wall: stoneWall, roof: redTile, doorW: 18, doorH: 26, win: true },
+  townhall: { T: 3, ox: 112, oy: 130, W: 224, Hh: 244, H: 46, R: 38, wall: stoneWall, roof: shingle, doorW: 20, doorH: 30, win: true },
+  chapel: { T: 3, ox: 112, oy: 160, W: 224, Hh: 270, H: 44, R: 44, wall: plaster, roof: shingle, doorW: 14, doorH: 30, win: true, tower: true },
+  trading: { T: 3, ox: 112, oy: 122, W: 224, Hh: 236, H: 32, R: 28, wall: planks, roof: thatch, doorW: 24, doorH: 26 },
   house: { T: 2, ox: 80, oy: 98, W: 160, Hh: 176, H: 30, R: 30, wall: logWall, roof: thatch, doorW: 11, doorH: 21, chimney: true, win: true },
   barn: { T: 3, ox: 112, oy: 122, W: 224, Hh: 236, H: 42, R: 42, wall: planks, roof: shingle, doorW: 26, doorH: 32, chimney: false, win: false },
   gatherer: { T: 2, ox: 80, oy: 90, W: 160, Hh: 168, H: 22, R: 24, wall: logWall, roof: mossThatch, doorW: 12, doorH: 17, chimney: false, win: false },
@@ -420,6 +477,18 @@ function house(rot, stage, style = 'house') {
     plane(P(midX, y0 - E, H + R), P(midX, y1 + E, H + R), P(x1 + E, y0 - E, H - 3), roofStage3 ? rafter(0.72) : o.roof(0.76, 8));
     chimneyBase = [midX - 0.2, y0 + 0.4];
   }
+  if (o.tower && stage === 4) {
+    const c = 0.28, cx = 1.5, cy = T_ower(wT), z0 = 0, z1 = H + R + 44;
+    const a0 = P(cx - c, cy + c, z1), b0 = P(cx + c, cy + c, z1), c0 = P(cx + c, cy - c, z1), d0 = P(cx - c, cy - c, z1);
+    p.plane(a0, [b0[0] - a0[0], b0[1] - a0[1]], [0, z1 - z0], stoneWall(1.08, 12));
+    p.plane(b0, [c0[0] - b0[0], c0[1] - b0[1]], [0, z1 - z0], stoneWall(0.72, 13));
+    const top = [(a0[0] + c0[0]) / 2, (a0[1] + c0[1]) / 2 - 26];
+    p.poly([a0, b0, top], 0x55575f); p.poly([b0, c0, top], 0x3f4048);
+    p.rect(top[0], top[1] - 7, 1, 7, 0xd9b872); p.rect(top[0] - 2, top[1] - 5, 5, 1, 0xd9b872);
+  }
+  if (style === 'woodcutter' && stage === 4) {
+    for (let i = 0; i < 4; i++) { const q = P(x1 + 0.1 - i * 0.18, y1 + 0.03, 3); p.ellipse(q[0], q[1], 3, 3.4, 0xc99d62); }
+  }
   let smoke = null;
   if (stage === 4 && o.chimney) {
     const [cx, cy] = chimneyBase;
@@ -489,6 +558,119 @@ function depot(rot, stage) {
   return { p: p.outline(0x1a1411, 100) };
 }
 
+const T_ower = t => t / 2;
+function market(rot) {
+  const ox = 112, oy = 76, p = new Pix(224, 200, ox, oy), P = projector(ox, oy);
+  dirtPad(p, P, 3, 3);
+  const cols = [[0xc0553c, 0xe6d3a8], [0x4a7a8c, 0xe6d3a8], [0xc9a23c, 0x6b4a2c]];
+  [[0.2, 0.3], [1.65, 0.3], [0.9, 1.75]].forEach(([x, y], i) => {
+    const w = 1.1, d = 0.9, H = 26;
+    for (const [a, b] of [[x, y], [x + w, y], [x, y + d], [x + w, y + d]]) post(p, P, a, b, 0, H, 0x5d4530);
+    const q = P(x, y + d, 12), r = P(x + w, y + d, 12), m = P(x + w, y, 12);
+    p.plane(q, [r[0] - q[0], r[1] - q[1]], [0, 11], () => 0x7a5a3c);
+    p.plane(r, [m[0] - r[0], m[1] - r[1]], [0, 11], () => 0x5a4230);
+    for (let k = 0; k < 6; k++) { const e = P(x + 0.1 + k * 0.16, y + d - 0.2, 13); p.ellipse(e[0], e[1], 2, 1.6, [0xd9863a, 0xc2483a, 0xa7b04d, 0xe6d3a8][(k + i) % 4]); }
+    const O = P(x - 0.1, y - 0.1, H + 9), A = P(x + w + 0.1, y - 0.1, H + 9), B = P(x - 0.1, y + d + 0.1, H - 2);
+    p.plane(O, [A[0] - O[0], A[1] - O[1]], [B[0] - O[0], B[1] - O[1]], (s) => cols[i][Math.floor(s * 7) % 2]);
+  });
+  void rot;
+  return p.outline(0x1a1411, 110);
+}
+function pit(kind, rot) {
+  const ox = 112, oy = 76, p = new Pix(224, 200, ox, oy), P = projector(ox, oy);
+  const A = P(0, 0);
+  p.plane(A, [96, 48], [-96, 48], (s, t, u, v, x, y) => {
+    const e = Math.min(s, 1 - s, t, 1 - t), ring = Math.floor(e * 8);
+    const n = hash(x >> 1, y >> 1, 5);
+    const base = kind === 'mine' ? [0x6a5a50, 0x5a4c44, 0x4a3e38, 0x3a302c][ring] : [0x8d8d90, 0x7a7a7e, 0x66666b, 0x55555a][ring];
+    return n > 0.8 ? shade(base, 0.85) : base;
+  });
+  if (kind === 'mine') {
+    p.ellipse(...P(1.1, 1.1, 16), 56, 32, (u, v, x, y) => levels(STONE, 0.55 - u * 0.3 - v * 0.42 + (hash(x >> 2, y >> 2, 4) - 0.5) * 0.15));
+    const O = P(1.15, 2.05, 28);
+    p.plane(O, [34, 17], [0, 28], (s, t) => (s < 0.12 || s > 0.88 || t < 0.12) ? 0x6d4e34 : 0x120f0e);
+    for (let i = 0; i < 6; i++) { const q = P(1.4 + i * 0.05, 2.15 + i * 0.12, 1); p.rect(q[0] - 3, q[1], 7, 1, 0x4a3628); }
+    for (let i = 0; i < 9; i++) { const q = P(2.2 + hash(i, 1, 3) * 0.6, 1.9 + hash(i, 2, 3) * 0.7, 3); p.ellipse(q[0], q[1], 3, 2.4, hash(i, 3, 3) > 0.5 ? 0xb9643a : 0x5d4641); }
+  } else {
+    for (let i = 0; i < 3; i++) { const q = P(0.6 + i * 0.75, 2.45, 8); p.rect(q[0] - 9, q[1] - 6, 18, 12, 0xa5a5a8); p.rect(q[0] - 9, q[1] - 6, 18, 2, 0xc8c8ca); p.rect(q[0] + 5, q[1] - 6, 4, 12, 0x77777b); }
+    const m = P(0.7, 0.7, 0); post(p, P, 0.7, 0.7, 0, 46, 0x5d4530); p.line(m[0], m[1] - 46, m[0] + 28, m[1] - 34, 0x6d4e34); p.line(m[0] + 28, m[1] - 34, m[0] + 28, m[1] - 14, 0xc8c8ca);
+  }
+  void rot;
+  return p.outline(0x1a1411, 100);
+}
+function cemetery() {
+  const ox = 112, oy = 76, p = new Pix(224, 200, ox, oy), P = projector(ox, oy);
+  dirtPad(p, P, 3, 3);
+  for (const [a, b] of [[[0.1, 0.1], [2.9, 0.1]], [[0.1, 0.1], [0.1, 2.9]], [[0.1, 2.9], [1.2, 2.9]], [[1.8, 2.9], [2.9, 2.9]], [[2.9, 0.1], [2.9, 2.9]]]) {
+    for (let i = 0; i <= 10; i++) post(p, P, a[0] + (b[0] - a[0]) * i / 10, a[1] + (b[1] - a[1]) * i / 10, 0, 11, 0x4a3628);
+    beam(p, P, [a[0], a[1], 8], [b[0], b[1], 8], 0x5d4530);
+  }
+  return p.outline(0x1a1411, 90);
+}
+function grave() {
+  const p = new Pix(18, 22, 9, 18);
+  p.ellipse(9, 18, 6, 3, 0x5a4a34);
+  p.rect(7, 4, 4, 13, 0x8d8d90); p.rect(7, 4, 1, 13, 0xbdbdc0); p.rect(4, 8, 10, 3, 0x8d8d90); p.rect(4, 8, 10, 1, 0xbdbdc0);
+  return p.outline(0x171519, 140);
+}
+function well() {
+  const ox = 80, oy = 80, p = new Pix(160, 150, ox, oy), P = projector(ox, oy);
+  dirtPad(p, P, 2, 2);
+  const c = P(1, 1, 10);
+  p.ellipse(c[0], c[1] + 12, 24, 13, (u, v, x, y) => (hash(x >> 2, y >> 1, 3) > 0.5 ? 0x8d8a82 : 0x6c6962));
+  p.ellipse(c[0], c[1] + 2, 24, 13, (u, v, x, y) => (u * u + v * v < 0.45 ? 0x1f3644 : hash(x >> 2, y >> 1, 3) > 0.5 ? 0xa6a39a : 0x82807a));
+  post(p, P, 0.5, 1.4, 8, 46, 0x5d4530); post(p, P, 1.5, 0.6, 8, 46, 0x5d4530);
+  const a = P(0.3, 1.5, 44), b = P(1.7, 0.5, 44), t = P(1, 1, 64);
+  p.poly([a, b, [t[0], t[1]]], 0x7b6a58); p.poly([a, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2 + 12], b, [t[0], t[1]]], 0x6b5a48);
+  return p.outline(0x1a1411, 120);
+}
+function deer(front) {
+  const p = new Pix(30, 26, 15, 22);
+  p.ellipse(16, 22, 9, 3, SHADOW, 70);
+  p.rect(7, 10, 15, 7, 0x8a6240); p.rect(7, 10, 15, 2, 0xa67c50); p.rect(8, 17, 2, 5, 0x5e432c); p.rect(19, 17, 2, 5, 0x5e432c); p.rect(11, 17, 2, 5, 0x6d4e34); p.rect(16, 17, 2, 5, 0x6d4e34);
+  p.rect(21, 5, 3, 8, 0x8a6240); p.rect(22, 3, 5, 4, 0x9a7048); p.set(26, 4, 0x201712);
+  p.line(22, 3, 20, 0, 0x4a3628); p.line(24, 3, 26, 0, 0x4a3628); p.rect(6, 11, 2, 2, 0xe6d9bc);
+  void front;
+  return p.outline(0x14100f, 150);
+}
+function sheep() {
+  const p = new Pix(22, 18, 11, 15);
+  p.ellipse(11, 15, 7, 2.4, SHADOW, 70);
+  p.rect(6, 11, 2, 4, 0x332a26); p.rect(14, 11, 2, 4, 0x332a26);
+  p.ellipse(10, 9, 7, 5, (u, v, x, y) => (hash(x, y, 2) > 0.7 ? 0xcfc8ba : u + v < 0 ? 0xf0ebdf : 0xdcd5c6));
+  p.rect(15, 6, 4, 4, 0x332a26); p.set(18, 7, 0xe6d9bc);
+  return p.outline(0x14100f, 130);
+}
+function flame(i) {
+  const p = new Pix(36, 44, 18, 40);
+  for (let k = 0; k < 7; k++) {
+    const x = 18 + (hash(k, i, 3) - 0.5) * 22, h = 18 + hash(k, i, 4) * 18;
+    p.poly([[x - 6, 40], [x + 6, 40], [x + (i - 1) * 2, 40 - h]], 0xd9581f);
+    p.poly([[x - 3, 40], [x + 3, 40], [x - (i - 1), 40 - h * 0.6]], 0xf5c13c);
+  }
+  return p;
+}
+function flag(level) {
+  const p = new Pix(18, 26, 2, 25);
+  p.rect(2, 2, 1, 23, 0x3a2a1c);
+  const c = level === 2 ? 0x4a7a8c : 0xd9b872;
+  p.poly([[3, 3], [15, 7], [3, 11]], c);
+  if (level === 3) p.rect(5, 6, 2, 2, 0x7a2f22);
+  return p.outline(0x14100f, 140);
+}
+function decal(k) {
+  const p = new Pix(68, 36, 34, 2), P = projector(34, 2), A = P(-0.02, -0.02);
+  p.plane(A, [33.4, 16.7], [-33.4, 16.7], (s, t, u, v, x, y) => {
+    const n = hash(x >> 1, y >> 1, 3 + k), e = Math.min(s, 1 - s, t, 1 - t);
+    if (k === 5) { if (e < 0.16 && n < 0.8 || n < 0.34) return null; return n > 0.75 ? 0x7e6647 : 0x6e583c; }
+    if (k === 1) { if (e < 0.05 && n < 0.5) return null; return n > 0.78 ? 0x957a55 : n > 0.3 ? 0x866c49 : 0x75603f; }
+    if (k === 2) { const a = Math.floor(s * 5), b = Math.floor(t * 5); const q = hash(a, b, 7); if ((s * 5) % 1 < 0.1 || (t * 5) % 1 < 0.1) return 0x4d4c50; return q > 0.6 ? 0x98989c : q > 0.3 ? 0x88888c : 0x78787c; }
+    if (k === 3) { if (e < 0.04) return 0x3a2a1c; return (s * 6) % 1 < 0.14 ? 0x4a3628 : n > 0.5 ? 0x8a6a45 : 0x7a5c3c; }
+    return e < 0.14 ? 0x3a3a42 : 0x16161a;
+  });
+  return p;
+}
+
 /* ---------- Campos e cultivos ---------- */
 function tilled() {
   const p = new Pix(66, 34, 33, 1);
@@ -502,7 +684,16 @@ function tilled() {
   });
   return p;
 }
+const fruit = col => (p, x, y, g, ripe) => {
+  const h = [8, 14, 18][g], r = [3, 6, 8][g];
+  p.ellipse(x + 4, y, r, 2, SHADOW, 60);
+  p.rect(x, y - h, 2, h, 0x5a4230);
+  p.ellipse(x + 1, y - h - r * 0.4, r + 1, r, (u, v) => (u + v < -0.2 ? 0x7da04d : u + v < 0.5 ? 0x5f8439 : 0x4a6c2e));
+  if (ripe) for (let i = 0; i < 7; i++) p.rect(x - 5 + Math.floor(hash(i, 1, 2) * 12), y - h - 5 + Math.floor(hash(i, 2, 2) * 9), 2, 2, col);
+};
 const PLANTS = {
+  apple: fruit(0xc2382f),
+  pear: fruit(0xd9c64a),
   wheat(p, x, y, g, ripe) {
     const c = ripe ? 0xd9b65a : g === 0 ? 0x7fa24b : g === 1 ? 0x8aa84c : 0xa5ad50, d = ripe ? 0xa98438 : 0x5e7e38;
     const h = [3, 7, 11][g] + (ripe ? 1 : 0);
@@ -543,7 +734,8 @@ function crop(name, stage) {
   const p = new Pix(66, 44, 33, 30);
   const P = projector(33, 30);
   const ripe = stage === 3, g = Math.min(2, stage);
-  for (const [a, b] of [[0.25, 0.3], [0.62, 0.22], [0.3, 0.68], [0.72, 0.62], [0.5, 0.48], [0.12, 0.55], [0.55, 0.85], [0.85, 0.35]]) {
+  const spots = name === 'apple' || name === 'pear' ? [[0.5, 0.5]] : [[0.25, 0.3], [0.62, 0.22], [0.3, 0.68], [0.72, 0.62], [0.5, 0.48], [0.12, 0.55], [0.55, 0.85], [0.85, 0.35]];
+  for (const [a, b] of spots) {
     const [x, y] = P(a, b);
     PLANTS[name](p, Math.round(x), Math.round(y), g, ripe);
   }
@@ -575,6 +767,15 @@ export function buildAll(add) {
   })());
   [1, 2, 3].forEach(n => addPix(`pile_food_${n}`, heap([0x7a5b34, 0x93703f, 0xad884f, 0xc7a264, 0xd9863a, 0xe0a14c], n, 11, false)));
   add('tilled', tilled());
+  [1, 2, 3, 4, 5].forEach(k => add(`road${k}`, decal(k)));
+  addPix('deer', deer()); addPix('sheep', sheep()); addPix('grave', grave());
+  [0, 1, 2].forEach(i => addPix(`flame${i}`, flame(i)));
+  addPix('lvl2', flag(2)); addPix('lvl3', flag(3));
+  for (let v = 0; v < 3; v++) {
+    addPix(`tree0${v}_w`, snowPine(pine(v)));
+    addPix(`tree1${v}_w`, bareTree(v, false));
+    addPix(`tree2${v}_w`, bareTree(v, true));
+  }
   for (const name of Object.keys(PLANTS)) for (let st = 0; st < 4; st++) addPix(`crop_${name}_${st}`, crop(name, st));
   const meta = { smoke: {} };
   for (let rot = 0; rot < 4; rot++) {
@@ -588,7 +789,19 @@ export function buildAll(add) {
       addPix(`depot_r${rot}_s${st}`, depot(rot, st).p);
       addPix(`barn_r${rot}_s${st}`, house(rot, st, 'barn').p);
       addPix(`gatherer_r${rot}_s${st}`, house(rot, st, 'gatherer').p);
+      if (st === 4) for (const k of ['woodcutter', 'forester', 'fisher', 'hunter', 'herbalist', 'smith', 'tailor', 'school', 'hospital', 'townhall', 'chapel', 'trading', 'stonehouse']) {
+        const b = house(rot, 4, k);
+        addPix(`${k}_r${rot}_s4`, b.p);
+        if (k === 'stonehouse') { addPix(`stonehouse_r${rot}_glow`, b.glow); meta.smoke[`stonehouse_r${rot}`] = [b.smoke[0] - b.p.ox, b.smoke[1] - b.p.oy]; }
+      }
     }
+  }
+  for (let rot = 0; rot < 4; rot++) {
+    addPix(`market_r${rot}_s4`, market(rot));
+    addPix(`quarry_r${rot}_s4`, pit('quarry', rot));
+    addPix(`mine_r${rot}_s4`, pit('mine', rot));
+    addPix(`cemetery_r${rot}_s4`, cemetery());
+    addPix(`well_r${rot}_s4`, well());
   }
   // Fumaça, brilho na água, marcadores
   for (let i = 0; i < 3; i++) {
@@ -614,6 +827,8 @@ export function buildAll(add) {
 // Ícones da interface, desenhados à mão em grade 16×16.
 const pal = { a: 0x3b2a1c, b: 0x7a5a3c, c: 0xc8cbcf, d: 0x8d9198, e: 0xd9b872, f: 0x6d9a4e, g: 0xe2733a, h: 0xf0e4c4, i: 0x8c6239, j: 0x62544a, k: 0xb4b1aa };
 const ICONS = {
+  firewood: ['................', '................', '...bbbbbbbbe....', '..iiiiiiiieee...', '.bbbbbbbbbeee...', '.eeibbbbbbbb....', 'eeeeiiiiiiiie...', 'eeeeibbbbbbeee..', '.eebbbbbbbbeee..', '..iiiiiiiiieee..', '...bbbbbbbb.....', '................', '................', '................', '................', '................'],
+  road: ['................', '......aiaa......', '.....aaibaa.....', '.....aiibaa.....', '....aaaibaaa....', '....aaiibaaa....', '...aaaaibaaaa...', '...aaaiibaaaa...', '..aaaaaibaaaaa..', '..aaaaiibaaaaa..', '.aaaaaaibaaaaaa.', '.aaaaaiibaaaaaa.', '................', '................', '................', '................'],
   build: ['................', '........cc......', '.......cccc.....', '......ccccc.....', '.....ccb.cc.....', '....bbb..c......', '...bbb..........', '..bbb...........', '.bbb............', '.bb....ee.......', '......eeee......', '.....eeeeee.....', '......bbbb......', '......baab......', '......baab......', '................'],
   manage: ['................', '...aaaaaaaaaa...', '..hhhhhhhhhhhh..', '..h..........h..', '..h.ff.aaaaa.h..', '..h.ff.......h..', '..h..........h..', '..h.ee.aaaaa.h..', '..h.ee.......h..', '..h..........h..', '..h.gg.aaaaa.h..', '..h.gg.......h..', '..h..........h..', '..hhhhhhhhhhhh..', '................', '................'],
   food: ['................', '.......b........', '......fb........', '.....ffb........', '....ggggggg.....', '...ggggggggg....', '..gggggggggg....', '..gggeggggggg...', '..ggeegggggggg..', '..gggggggggggg..', '..ggggggggggg...', '...gggggggggg...', '....ggggggg.....', '................', '................', '................'],

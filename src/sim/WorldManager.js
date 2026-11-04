@@ -11,6 +11,8 @@ export class WorldManager {
     this.doorAt = new Uint8Array(n);
     this.comp = new Int32Array(n).fill(-1);
     this.nodeBlocks = new Uint8Array(n);
+    this.road = new Uint8Array(n); // 1 terra, 2 pedra, 3 ponte, 4 túnel, 5 trilha
+    this.worn = new Float32Array(n);
     this.fieldAt = new Int32Array(n).fill(-1);
     this.forageUntil = new Float32Array(n);
     this.compDirty = true;
@@ -19,10 +21,16 @@ export class WorldManager {
   inb(x, y) { return x >= 0 && y >= 0 && x < this.w && y < this.h; }
   blockedI(i) {
     const t = this.terrain[i];
-    return t === T.WATER || t === T.MOUNTAIN || this.buildingAt[i] !== -1 || this.nodeBlocks[i] === 1;
+    if (t === T.WATER && this.road[i] !== 3) return true;
+    if (t === T.MOUNTAIN && this.road[i] !== 4) return true;
+    return this.buildingAt[i] !== -1 || this.nodeBlocks[i] === 1;
   }
   blocked(x, y) { return !this.inb(x, y) || this.blockedI(this.idx(x, y)); }
   costI(i) {
+    const r = this.road[i];
+    if (r === 5) return 0.82;
+    if (r === 1) return 0.65;
+    if (r >= 2) return 0.5;
     if (this.terrain[i] === T.FORD) return 2.1;
     if (this.nodeAt[i] !== -1) return 1.5;
     return 1;
@@ -76,12 +84,22 @@ export class WorldManager {
       if (!this.inb(i, j)) return { ok: false, reason: 'Fora do mapa' };
       const k = this.idx(i, j), t = this.terrain[k];
       if (t === T.WATER || t === T.FORD) return { ok: false, reason: 'Não dá para construir na água' };
+      if (this.road[k] === 3 || this.road[k] === 4) return { ok: false, reason: 'Há uma ponte ou túnel aqui' };
       if (t === T.MOUNTAIN) return { ok: false, reason: 'Não dá para construir na montanha' };
       if (this.buildingAt[k] !== -1) return { ok: false, reason: 'Já existe uma construção aqui' };
       if (this.nodeAt[k] !== -1) return { ok: false, reason: 'Limpe árvores e rochas deste terreno primeiro' };
       if (this.pileAt[k] !== -1) return { ok: false, reason: 'Há materiais no chão aqui' };
       if (this.fieldAt[k] !== -1) return { ok: false, reason: 'Há uma fazenda aqui' };
       if (this.doorAt[k]) return { ok: false, reason: 'Isto bloquearia a entrada de outra construção' };
+    }
+    const need = BUILDINGS[type].needs;
+    if (need) {
+      const tt = need === 'water' ? T.WATER : T.MOUNTAIN;
+      let near = false;
+      for (let j = y - 2; j < y + h + 2 && !near; j++) for (let i = x - 2; i < x + w + 2; i++) {
+        if (this.inb(i, j) && this.terrain[this.idx(i, j)] === tt) { near = true; break; }
+      }
+      if (!near) return { ok: false, reason: need === 'water' ? 'Precisa ficar à beira da água' : 'Precisa encostar na montanha' };
     }
     const d = this.doorTile(type, x, y, rot);
     if (this.blocked(d.x, d.y)) return { ok: false, reason: 'A entrada ficaria bloqueada. Gire a construção' };

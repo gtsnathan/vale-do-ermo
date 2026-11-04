@@ -1,5 +1,5 @@
 import { Simulation } from './Simulation.js';
-import { DIFFICULTY, FOODS, RES } from './defs.js';
+import { COAT_LIFE, DIFFICULTY, FOODS, RES, TOOL_LIFE } from './defs.js';
 
 // O mapa é refeito pela semente; salva-se só o que mudou desde a geração.
 export const SaveManager = {
@@ -8,16 +8,18 @@ export const SaveManager = {
     const removed = [];
     for (const id of original.nodes.keys()) if (!sim.nodes.has(id)) removed.push(id);
     const changed = [];
-    for (const n of sim.nodes.values()) if (n.marked || n.work > 0) changed.push({ id: n.id, marked: n.marked, work: n.work, reservedBy: n.reservedBy });
+    for (const n of sim.nodes.values()) if (!n.planted && (n.marked || n.work > 0)) changed.push({ id: n.id, marked: n.marked, work: n.work, reservedBy: n.reservedBy });
     return JSON.stringify({
-      v: 3, chronicle: sim.chronicle, history: sim.history, lastDay: sim.lastDay, config: sim.config, time: sim.time, steps: sim.steps, nextId: sim.nextId, rng: sim.rng.s,
+      v: 4, worn: sim.wornList.map(i => [i, Math.round(sim.world.worn[i])]), roads: sim.roads, roadJobs: sim.roadJobs, animals: sim.animals, animalCap: sim.animalCap, trade: sim.trade,
+      unburied: sim.unburied, griefUntil: sim.griefUntil, winterExtra: sim.winterExtra, badHarvest: sim.badHarvest, reports: sim.reports,
+      planted: [...sim.nodes.values()].filter(n => n.planted), chronicle: sim.chronicle, history: sim.history, lastDay: sim.lastDay, config: sim.config, time: sim.time, steps: sim.steps, nextId: sim.nextId, rng: sim.rng.s,
       startStock: sim.startStock, stats: sim.stats, removed, changed,
       buildings: sim.buildings, piles: sim.piles, citizens: sim.citizens, farms: sim.farms,
     });
   },
   load(text) {
     const d = JSON.parse(text);
-    if (![1, 2, 3].includes(d.v)) throw new Error('Versão de salvamento desconhecida');
+    if (![1, 2, 3, 4].includes(d.v)) throw new Error('Versão de salvamento desconhecida');
     const sim = new Simulation(d.config);
     const W = sim.world;
     for (const b of sim.buildings) {
@@ -29,6 +31,16 @@ export const SaveManager = {
     sim.rng.s = d.rng;
     if (d.v === 1) this._fromV1(sim);
     if (d.v < 3) this._toV3(sim);
+    if (d.v < 4) this._toV4(sim);
+    else Object.assign(sim, { animals: d.animals, animalCap: d.animalCap, trade: d.trade, unburied: d.unburied, griefUntil: d.griefUntil, winterExtra: d.winterExtra, badHarvest: d.badHarvest, reports: d.reports, roadJobs: d.roadJobs });
+    for (const r of d.roads || []) { W.road[W.idx(r.x, r.y)] = r.k; sim.roads.push(r); }
+    for (const n of d.planted || []) {
+      sim.nodes.set(n.id, n);
+      W.nodeAt[W.idx(n.x, n.y)] = n.id;
+      if (n.young) sim.saplings.add(n);
+    }
+    for (const [i, v] of d.worn || []) { W.worn[i] = v; sim.wornList.push(i); }
+    sim.season.last = sim.season.index();
     sim.chronicle = d.chronicle || []; sim.history = d.history || []; sim.lastDay = d.lastDay ?? sim.day();
     for (const id of d.removed) { const n = sim.nodes.get(id); if (n) sim.removeNode(n); }
     for (const c of d.changed) {
@@ -45,6 +57,16 @@ export const SaveManager = {
     sim.events = [];
     W.recomputeComps();
     return sim;
+  },
+  // Vilas antigas recebem os campos de estação, trabalho e cidade.
+  _toV4(sim) {
+    const fill = o => { for (const r of RES) o[r] = o[r] || 0; };
+    fill(sim.stats.produced); fill(sim.stats.consumed); fill(sim.startStock);
+    for (const b of sim.buildings) for (const k of ['stock', 'reserved', 'delivered', 'enroute']) if (b[k]) fill(b[k]);
+    for (const f of sim.farms) f.kind = f.kind || 'farm';
+    for (const c of sim.citizens) {
+      if (c.warmth == null) Object.assign(c, { warmth: 100, warming: false, sick: 0, educated: false, toolLife: TOOL_LIFE, coatLife: COAT_LIFE });
+    }
   },
   // Vilas anteriores à 0.3 ganham os dados de família e saúde.
   _toV3(sim) {

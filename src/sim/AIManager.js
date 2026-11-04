@@ -1,4 +1,4 @@
-import { FARM_WORK, HUNGER_RATE, NODE, STEP, WALK } from './defs.js';
+import { COAT_LIFE, FARM_WORK, HUNGER_RATE, NODE, STEP, TOOL_LIFE, WALK } from './defs.js';
 
 // Máquina de estados dos aldeões: anda, pega, carrega, entrega, trabalha.
 export class AIManager {
@@ -10,6 +10,10 @@ export class AIManager {
     c.hunger = Math.min(100, c.hunger + HUNGER_RATE * STEP * (c.inside ? 0.5 : 1));
     if (c.inside) {
       const home = S.building(c.home);
+      if (c.warming) {
+        if (c.warmth >= 85 || !home) { c.warming = false; if (!S.isNight()) { c.inside = false; c.task = null; } }
+        return;
+      }
       if (home && c.hunger > 45) S.population.eatFromPantry(c, home);
       if (!S.isNight()) { c.inside = false; c.task = null; c.think = S.rng.next() * 2; }
       return;
@@ -67,10 +71,10 @@ export class AIManager {
     const cur = W.idx(c.x | 0, c.y | 0);
     const dx = tx - c.x, dy = ty - c.y, d = Math.hypot(dx, dy);
     // Quem passa fome anda mais devagar. Doenças entram na versão 0.4.
-    const step = (WALK * STEP) / W.costI(cur) * (c.hunger >= 95 ? 0.7 : 1) * (c.health < 30 ? 0.8 : 1) * (c.age >= 60 ? 0.85 : 1) * (S.population.isChild(c) ? 0.75 : 1);
+    const step = (WALK * STEP) / W.costI(cur) * (c.hunger >= 95 ? 0.7 : 1) * (c.health < 30 ? 0.8 : 1) * (c.age >= 60 ? 0.85 : 1) * (c.sick > 0 ? 0.75 : 1) * (S.season.index() === 3 && S.world.road[cur] === 0 ? 0.85 : 1) * (S.population.isChild(c) ? 0.75 : 1);
     this._face(c, dx, dy);
     c.anim = 'walk';
-    if (d <= step) { c.x = tx; c.y = ty; c.pathI++; }
+    if (d <= step) { c.x = tx; c.y = ty; c.pathI++; S.infra.step_on(nx, ny); }
     else { c.x += dx / d * step; c.y += dy / d * step; }
     return 'moving';
   }
@@ -119,8 +123,8 @@ export class AIManager {
     c.inv.res = null; c.inv.amount = 0; c.task = null; c.think = 0.2;
   }
   _deliver(c, t) {
-    const S = this.sim, site = S.building(t.siteId);
-    if (!site || site.done) return S.jobs.abort(c);
+    const S = this.sim, site = S.building(t.siteId), pj = S.construction.proj(site);
+    if (!pj) return S.jobs.abort(c);
     if (t.step === 0) {
       let goal;
       const src = t.srcType === 'depot' ? S.building(t.srcId) : S.resources.pile(t.srcId);
@@ -139,13 +143,13 @@ export class AIManager {
     const r = this._go(c, spots);
     if (r === 'fail') return this._fail(c, site);
     if (r !== 'arrived') return;
-    site.delivered[t.res] += t.n;
-    site.enroute[t.res] -= t.n;
+    pj.delivered[t.res] += t.n;
+    pj.enroute[t.res] -= t.n;
     c.inv.res = null; c.inv.amount = 0; c.task = null; c.think = 0.2;
   }
   _build(c, t) {
     const S = this.sim, site = S.building(t.siteId);
-    if (!site || site.done) return S.jobs.abort(c);
+    if (!S.construction.proj(site)) return S.jobs.abort(c);
     if (S.isNight()) return S.jobs.abort(c);
     if (!t.there) {
       const r = this._go(c, [t.spot]);
@@ -155,7 +159,7 @@ export class AIManager {
     }
     this._face(c, site.x + site.w / 2 - c.x, site.y + site.h / 2 - c.y);
     c.anim = 'work'; c.tool = 'hammer';
-    S.construction.addWork(site, STEP);
+    S.construction.addWork(site, STEP * S.population.rate(c));
   }
   _harvest(c, t) {
     const S = this.sim, n = S.nodes.get(t.nodeId);
@@ -168,7 +172,8 @@ export class AIManager {
     }
     this._face(c, n.x + 0.5 - c.x, n.y + 0.5 - c.y);
     c.anim = 'work'; c.tool = n.type === 'tree' ? 'axe' : 'pick';
-    n.work += STEP;
+    n.work += STEP * S.population.rate(c);
+    S.population.wear(c);
     if (n.work >= NODE[n.type].work) {
       const res = NODE[n.type].res, amount = NODE[n.type].yield;
       S.stats.produced[res] += amount;
@@ -249,7 +254,8 @@ export class AIManager {
       t.there = true;
     }
     c.anim = 'work'; c.tool = 'hoe';
-    t.w += STEP;
+    t.w += STEP * S.population.rate(c);
+    S.population.wear(c);
     if (t.w < FARM_WORK[tile.st]) return;
     S.farming.finishTile(farm, t.i, c);
     c.task = null; c.think = 0.1; c.anim = 'idle';
@@ -266,11 +272,50 @@ export class AIManager {
     c.anim = 'work'; c.tool = 'hoe';
     t.w += STEP;
     if (t.w < 7) return;
-    const res = c.inv.res || (S.rng.chance(0.6) ? 'berries' : 'mushroom');
+    const res = c.profession === 'herbalist' ? 'herbs' : c.inv.res || (S.rng.chance(0.6) ? 'berries' : 'mushroom');
     c.inv.res = res; c.inv.amount += 2;
     S.stats.produced[res] += 2;
     c.task = null; c.think = 0.2; c.anim = 'idle';
   }
+  _warm(c, t) {
+    const S = this.sim, b = S.building(t.buildingId);
+    if (!b) return S.jobs.abort(c);
+    const r = this._go(c, [[b.door.x, b.door.y]]);
+    if (r === 'fail') return this._fail(c);
+    if (r !== 'arrived') return;
+    c.inside = true; c.warming = true; c.task = null; c.anim = 'idle';
+  }
+  _cure(c, t) {
+    const S = this.sim, h = S.building(t.buildingId);
+    if (!h) return S.jobs.abort(c);
+    const r = this._go(c, [[h.door.x, h.door.y]]);
+    if (r === 'fail') return this._fail(c);
+    if (r !== 'arrived') return;
+    h.resv = Math.max(0, (h.resv || 0) - 1);
+    if ((h.input.herbs || 0) > 0) { h.input.herbs--; S.stats.consumed.herbs++; c.sick = 0; }
+    c.task = null; c.think = 0.5;
+  }
+  _equip(c, t) {
+    const S = this.sim, d = S.building(t.depotId);
+    if (!d || !d.done) return S.jobs.abort(c);
+    const r = this._go(c, [[d.door.x, d.door.y]]);
+    if (r === 'fail') return this._fail(c);
+    if (r !== 'arrived') return;
+    d.stock[t.res]--; d.reserved[t.res]--;
+    S.stats.consumed[t.res]++;
+    if (t.res === 'tools') c.toolLife = TOOL_LIFE; else c.coatLife = COAT_LIFE;
+    c.task = null; c.think = 0.2;
+  }
+  _craftFetch(c, t) { this.sim.work.craftFetch(c, t, this); }
+  _craft(c, t) { this.sim.work.craft(c, t, this); }
+  _staff(c, t) { this.sim.work.staff(c, t, this); }
+  _study(c, t) { this.sim.work.studyStep(c, t, this); }
+  _vend(c, t) { this.sim.work.carryTo(c, t, this); }
+  _export(c, t) { this.sim.work.carryTo(c, t, this); }
+  _hunt(c, t) { this.sim.work.hunt(c, t, this); }
+  _herd(c, t) { this.sim.work.herd(c, t, this); }
+  _plant(c, t) { this.sim.work.plant(c, t, this); }
+  _road(c, t) { this.sim.infra.step(c, t, this); }
   _idle(c, t) {
     const S = this.sim;
     if (t.wait > 0) { t.wait -= STEP; c.anim = 'idle'; return; }

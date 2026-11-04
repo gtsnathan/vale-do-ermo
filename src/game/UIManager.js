@@ -1,5 +1,5 @@
 import { iconDataURL } from '../art/sprites.js';
-import { BUILDINGS, CROPS, DAY, DIFFICULTY, FARM_MAX, FOODS, MAP_SIZES, MATERIALS, NODE, PROFESSIONS, RES, RES_LABEL } from '../sim/defs.js';
+import { BUILDINGS, CROPS, DAY, DIFFICULTY, FARM_MAX, FIELD_CROPS, FOODS, LEVEL_MAX, MAP_SIZES, MATERIALS, NODE, ORCHARD_CROPS, PROFESSIONS, PROF_NOTE, RES, RES_LABEL, TOP_RES, VALUE } from '../sim/defs.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s).replace(/[&<>"]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
@@ -20,8 +20,9 @@ export class UIManager {
       const what = types.includes('tree') ? 'árvores' : 'rochas';
       this.toast(n ? `${n} ${what} marcadas para coleta.` : `Nenhuma ${what === 'árvores' ? 'árvore' : 'rocha'} nesta área.`);
     });
-    game.events.on('farmPlaced', r => this.toast(r.ok ? 'Fazenda criada. Escolha o cultivo e defina agricultores em Gestão.' : r.reason));
-    game.events.on('news', e => { if (e.kind !== 'family') this.toast(e.text); });
+    game.events.on('farmPlaced', r => this.toast(r.ok ? 'Área criada. Defina os trabalhadores em Gestão.' : r.reason));
+    game.events.on('news', e => { if (e.kind !== 'family' && e.kind !== 'sick') this.toast(e.text); });
+    game.events.on('roadPlaced', ({ n }) => this.toast(n ? `${n} tiles encomendados.` : 'Nada a construir neste trecho.'));
     game.events.on('toggle-pause', () => this.setSpeed(this.scene.speed === 0 ? (this.prevSpeed || 1) : 0));
     game.events.on('speed', s => this.setSpeed(s));
     this.tickT = 0;
@@ -29,7 +30,7 @@ export class UIManager {
   attach(scene) { this.scene = scene; this._syncTool(); this.setSpeed(scene.speed); }
 
   _topbar() {
-    $('#res').innerHTML = MATERIALS.map(r => `<div class="stat" title="${RES_LABEL[r]} nos depósitos">${icon(r)}<b id="r-${r}">0</b></div>`).join('') +
+    $('#res').innerHTML = TOP_RES.map(r => `<div class="stat" title="${RES_LABEL[r]} nos depósitos">${icon(r)}<b id="r-${r}">0</b></div>`).join('') +
       `<div class="stat" title="Espaço usado nos depósitos"><span class="lbl">Depósitos</span><b id="r-cap">0/0</b></div>
       <div class="stat" title="Comida guardada, somando celeiros e casas">${icon('food')}<b id="r-food">0</b></div>`;
     $('#vil').innerHTML = `<div class="stat" title="População">${icon('pop')}<b id="v-pop">10</b></div>
@@ -68,13 +69,27 @@ export class UIManager {
       if (id === 'people') this.togglePanel('people');
     });
     const costOf = t => Object.entries(BUILDINGS[t].cost).map(([r, n]) => `${n} ${RES_LABEL[r].toLowerCase()}`).join(', ');
-    const items = [['house', 'house', 'Casa de madeira', costOf('house')], ['depot', 'depot', 'Depósito', costOf('depot')], ['barn', 'barn', 'Celeiro', costOf('barn')], ['gatherer', 'gatherer', 'Cabana de coleta', costOf('gatherer')], ['farm', 'farm', 'Fazenda', 'Só trabalho, sem material']];
-    $('#drawer').innerHTML = items.map(([ic, id, label, cost]) => `<button class="dr" id="t-${id}">${icon(ic)}<span><b>${label}</b><em>${cost}</em></span></button>`).join('');
+    const ICON = { house: 'house', stonehouse: 'house', depot: 'depot', barn: 'barn', market: 'depot', gatherer: 'gatherer', fisher: 'food', hunter: 'food', woodcutter: 'firewood', forester: 'axe', smith: 'pick', tailor: 'people', quarry: 'pick', mine: 'pick', school: 'manage', hospital: 'manage', townhall: 'manage', chapel: 'manage', trading: 'depot', cemetery: 'manage', well: 'erase', herbalist: 'gatherer' };
+    const cats = ['Moradia', 'Armazém', 'Alimento', 'Indústria', 'Serviços'];
+    const btn = (ic, id, label, cost) => `<button class="dr" id="t-${id}">${icon(ic)}<span><b>${label}</b><em>${cost}</em></span></button>`;
+    const extra = { Alimento: [['farm', 'farm', 'Fazenda', 'Só trabalho'], ['farm', 'orchard', 'Pomar', 'Só trabalho'], ['people', 'pasture', 'Pastagem', 'Só trabalho']] };
+    let html = '';
+    for (const cat of cats) {
+      html += `<h4>${cat}</h4><div class="dg">`;
+      for (const t in BUILDINGS) if (BUILDINGS[t].cat === cat) html += btn(ICON[t] || 'build', t, BUILDINGS[t].name, costOf(t));
+      for (const e of extra[cat] || []) html += btn(...e);
+      html += '</div>';
+    }
+    html += `<h4>Caminhos</h4><div class="dg">${btn('road', 'road1', 'Estrada de terra', 'Mais rápida')}${btn('road', 'road2', 'Estrada de pedra', '1 pedra por tile')}${btn('road', 'road3', 'Ponte', '1 madeira por tile')}${btn('road', 'road4', 'Túnel', '1 pedra por tile')}</div>`;
+    $('#drawer').innerHTML = html;
     $('#drawer').addEventListener('click', e => {
       const b = e.target.closest('button'); if (!b) return;
       const id = b.id.slice(2);
       $('#drawer').hidden = true;
-      if (id === 'farm') this.scene.setTool({ kind: 'field', label: `Arraste para desenhar a fazenda, de 3×3 a ${FARM_MAX}×${FARM_MAX}. Solo marrom rende mais.` });
+      if (id.startsWith('road')) {
+        const k = +id[4];
+        this.scene.setTool({ kind: 'road', k, label: `Arraste para traçar ${{ 1: 'a estrada', 2: 'a estrada de pedra', 3: 'a ponte sobre a água', 4: 'o túnel na montanha' }[k]}. Limpar remove estradas.` });
+      } else if (id === 'farm' || id === 'orchard' || id === 'pasture') this.scene.setTool({ kind: 'field', farmKind: id, label: `Arraste para desenhar: ${{ farm: 'fazenda', orchard: 'pomar', pasture: 'pastagem' }[id]}, de 3×3 a ${FARM_MAX}×${FARM_MAX}.` });
       else this.scene.setTool({ kind: 'place', type: id, rot: 0, tile: null });
     });
     $('#b-rot').innerHTML = `${icon('rotate')}<span>Girar</span>`;
@@ -85,11 +100,11 @@ export class UIManager {
   _syncTool() {
     if (!this.scene) return;
     const t = this.scene.tool;
-    const active = t.kind === 'select' ? 'select' : t.kind === 'place' || t.kind === 'field' ? 'build' : t.kind === 'mark' ? (!t.value ? 'unmark' : t.types.includes('tree') ? 'trees' : 'rocks') : '';
+    const active = t.kind === 'select' ? 'select' : t.kind === 'place' || t.kind === 'field' || t.kind === 'road' ? 'build' : t.kind === 'mark' ? (!t.value ? 'unmark' : t.types.includes('tree') ? 'trees' : 'rocks') : '';
     document.querySelectorAll('.tool').forEach(b => { if (b.id !== 't-people' && b.id !== 't-manage') b.classList.toggle('on', b.id === `t-${active}`); });
     const hint = $('#hint');
     hint.hidden = t.kind === 'select';
-    if (t.kind === 'mark' || t.kind === 'field') {
+    if (t.kind === 'mark' || t.kind === 'field' || t.kind === 'road') {
       $('#h-text').textContent = t.label;
       $('#b-rot').hidden = true; $('#b-ok').hidden = true;
     } else if (t.kind === 'place') {
@@ -105,7 +120,7 @@ export class UIManager {
     $('#m-size').innerHTML = sz; $('#m-diff').innerHTML = df;
     $('#m-seed').value = String(Math.floor(Math.random() * 90000) + 10000);
     $('#m-new').addEventListener('click', () => {
-      this.actions.newGame({ size: $('#m-size').value, difficulty: $('#m-diff').value, seed: $('#m-seed').value.trim() || 'ermo' });
+      this.actions.newGame({ size: $('#m-size').value, difficulty: $('#m-diff').value, seed: $('#m-seed').value.trim() || 'ermo', disease: true, events: $('#m-dis').checked });
       this.hideMenu();
     });
     $('#m-dice').addEventListener('click', () => { $('#m-seed').value = String(Math.floor(Math.random() * 90000) + 10000); this.actions.preview($('#m-seed').value, $('#m-size').value, $('#m-diff').value); });
@@ -165,6 +180,24 @@ export class UIManager {
       const b = e.target.closest('[data-act]');
       if (!b) return;
       const S = this.scene, s = S.selected;
+      if (b.dataset.act === 'up' || b.dataset.act === 'upx') {
+        const t = s?.type === 'farm' ? S.sim.farming.get(s.id) : S.sim.building(s?.id);
+        if (t) {
+          if (b.dataset.act === 'upx') S.sim.construction.cancelUpgrade(t);
+          else { const r = S.sim.construction.startUpgrade(t); this.toast(r.ok ? 'Melhoria encomendada. Os aldeões vão trazer o material.' : r.reason); }
+        }
+        this.lastHTML.inspectBody = null;
+        return;
+      }
+      if (s?.type === 'building' && ['slots', 'exp', 'buy', 'lim'].includes(b.dataset.act)) {
+        const t = S.sim.building(s.id);
+        if (!t) return;
+        if (b.dataset.act === 'slots') t.maxWorkers = Math.max(0, Math.min(BUILDINGS[t.type].workers, (t.maxWorkers ?? BUILDINGS[t.type].workers) + +b.dataset.d));
+        if (b.dataset.act === 'exp') t.exportRes = t.exportRes === b.dataset.r ? null : b.dataset.r;
+        if (b.dataset.act === 'buy') { const r = S.sim.work.buy(t, b.dataset.r, 5); this.toast(r.ok ? 'Compra feita. A mercadoria está no cais.' : r.reason); }
+        this.lastHTML.inspectBody = null;
+        return;
+      }
       if (s?.type === 'farm') {
         const f = S.sim.farming.get(s.id);
         if (!f) return;
@@ -224,14 +257,15 @@ export class UIManager {
       $('#b-ok').disabled = !v.ok;
     } else if ($('#h-why').textContent) $('#h-why').textContent = '';
     if (this.tickT % 12) return;
-    for (const r of MATERIALS) $(`#r-${r}`).textContent = sim.storage.total(r);
+    for (const r of TOP_RES) $(`#r-${r}`).textContent = sim.storage.total(r);
     $('#r-food').textContent = sim.foodTotal();
     $('#r-cap').textContent = `${sim.storage.usedTotal()}/${sim.storage.capacity()}`;
     $('#v-pop').textContent = sim.citizens.length;
     $('#v-home').textContent = `${sim.citizens.filter(c => c.home != null).length}/${sim.citizens.length}`;
     if (!sim.citizens.length && this.actions.inGame()) { this.actions.ended(sim); return; }
+    const temp = Math.round(sim.season.temp());
     const f = sim.dayFrac(), h = Math.floor(f * 24), m = Math.floor((f * 24 - h) * 6) * 10;
-    $('#clock').innerHTML = `<b>Ano ${sim.year()} · Dia ${sim.dayOfYear()}</b><span>${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}${sim.isNight() ? ' · noite' : ''}</span>`;
+    $('#clock').innerHTML = `<b>Ano ${sim.year()} · Dia ${sim.dayOfYear()}</b><span>${sim.season.name()} · ${temp}°C · ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}</span>`;
     void DAY;
     this._alerts(sim);
     this._goals(sim);
@@ -270,14 +304,17 @@ export class UIManager {
       const c = sim.citizen(s.id); if (!c) { S.selected = null; return; }
       title = c.name;
       const home = c.home != null ? sim.building(c.home) : null;
-      body = row('Agora', esc(sim.jobs.describe(c))) + row('Profissão', PROFESSIONS[c.profession] || 'Criança') + row('Idade', `${Math.floor(c.age)} anos`) + row('Sexo', c.sex === 'M' ? 'Masculino' : 'Feminino') +
+      body = row('Agora', esc(sim.jobs.describe(c))) + row('Profissão', PROFESSIONS[c.profession] || (c.profession === 'student' ? 'Estudante' : 'Criança')) + row('Idade', `${Math.floor(c.age)} anos`) + row('Sexo', c.sex === 'M' ? 'Masculino' : 'Feminino') +
         row('Família', esc(c.family)) + row('Cônjuge', person(c.spouse)) +
-        (c.parents.some(id => sim.citizen(id)) ? row('Pais', c.parents.filter(id => sim.citizen(id)).map(person).join(', ')) : '') +
+        (c.parents?.some(id => sim.citizen(id)) ? row('Pais', c.parents.filter(id => sim.citizen(id)).map(person).join(', ')) : '') +
         (sim.population.children(c).length ? row('Filhos', sim.population.children(c).map(k => person(k.id)).join(', ')) : '') +
         (c.pregnant > 0 ? row('Gravidez', `nasce em ${Math.max(1, Math.ceil(c.pregnant / DAY))} dias`) : '') + row('Casa', home ? (home.done ? 'Casa da família' : 'Em obra') : 'Sem casa') +
         row('Carregando', c.inv.res ? `${c.inv.amount} ${RES_LABEL[c.inv.res].toLowerCase()}` : 'Nada') +
         (c.lastMeal ? row('Última refeição', RES_LABEL[c.lastMeal]) : '') +
         `<div class="bar health"><label>Saúde <em>${Math.round(c.health)}%</em></label><div><i style="width:${c.health}%"></i></div></div>` +
+        `<div class="bar warm"><label>Calor <em>${Math.round(c.warmth)}%</em></label><div><i style="width:${c.warmth}%"></i></div></div>` +
+        row('Ânimo', `${Math.round(c.happiness)}%`) + row('Ferramenta', c.toolLife > 0 ? 'Em uso' : 'Sem') + row('Roupa', c.coatLife > 0 ? 'Em uso' : 'Sem') +
+        (c.educated ? row('Estudo', 'Formado') : '') + (c.sick > 0 ? row('Estado', 'Doente') : '') +
         `<div class="bar hunger"><label>Fome <em>${Math.round(c.hunger)}%</em></label><div><i style="width:${c.hunger}%"></i></div></div>`;
     } else if (s.type === 'building') {
       const b = sim.building(s.id); if (!b) { S.selected = null; return; }
@@ -292,36 +329,53 @@ export class UIManager {
         const status = !sim.construction.materialsComplete(b) ? 'Esperando materiais' : b.builders.length ? `${b.builders.length} construindo` : 'Esperando construtores';
         body = row('Situação', status) + bars + `<div class="bar work"><label>Trabalho <em>${Math.round(p * 100)}%</em></label><div><i style="width:${p * 100}%"></i></div></div>`;
       } else if (def.stores) {
-        const used = sim.storage.used(b);
-        const list = def.stores === 'food' ? FOODS : MATERIALS;
-        const shown = list.filter(r => def.stores === 'material' || b.stock[r] > 0);
-        body = `<div class="bar"><label>Ocupação <em>${used}/${def.capacity}</em></label><div><i style="width:${(used / def.capacity) * 100}%"></i></div></div>` +
+        const used = sim.storage.used(b), cap = sim.storage.cap(b);
+        const shown = RES.filter(r => b.stock[r] > 0);
+        body = `<div class="bar"><label>Ocupação <em>${used}/${cap}</em></label><div><i style="width:${(used / cap) * 100}%"></i></div></div>` +
           (shown.length ? shown.map(r => row(RES_LABEL[r], b.stock[r])).join('') : '<p class="note">Vazio.</p>');
-      } else if (b.type === 'gatherer') {
-        const staff = sim.citizens.filter(c => c.workplace === b.id);
-        const trees = sim.farming.forestAround(b);
-        body = row('Coletores', `${staff.length}/${def.workers}`) + staff.map(c => `<div class="row">${person(c.id)}</div>`).join('') +
-          row('Mata em volta', trees > 60 ? 'Farta' : trees > 15 ? 'Razoável' : trees > 0 ? 'Pouca' : 'Nenhuma');
+        if (def.prof) body += this._staffRows(sim, b, def, person);
+        if (b.type === 'trading') {
+          const boat = sim.trade.boat;
+          body += `<h5>Levar ao posto</h5><div class="crops">${['wood', 'firewood', 'stone', 'iron', 'tools', 'coat', 'potato', 'hide', 'fish'].map(r => `<button class="crop ${b.exportRes === r ? 'on' : ''}" data-act="exp" data-r="${r}">${RES_LABEL[r]}</button>`).join('')}</div>` +
+            row('Valor no posto', sim.work.postValue(b)) +
+            (boat ? `<h5>Barco no porto</h5>${boat.offers.map(o => `<div class="row"><span>${RES_LABEL[o.res]} · resta ${o.qty}</span><button class="btn" data-act="buy" data-r="${o.res}">Comprar 5 (${VALUE[o.res] * 5})</button></div>`).join('')}` : '<p class="note">Nenhum barco no momento.</p>');
+        }
+      } else if (!def.residents) {
+        body = def.prof ? this._staffRows(sim, b, def, person) : '';
+        if (b.type === 'gatherer' || b.type === 'herbalist') {
+          const trees = sim.farming.forestAround(b);
+          body += row('Mata em volta', trees > 60 ? 'Farta' : trees > 15 ? 'Razoável' : trees > 0 ? 'Pouca' : 'Nenhuma');
+        }
+        if (def.recipe) {
+          const R = def.recipe, inp = Object.keys(R.in).map(r => `${R.in[r]} ${RES_LABEL[r].toLowerCase()}`).join(' + ') || 'nada';
+          body += row('Receita', `${inp} → ${R.n} ${RES_LABEL[R.out].toLowerCase()}`) + Object.keys(R.in).map(r => row(`Na oficina: ${RES_LABEL[r]}`, b.input?.[r] || 0)).join('');
+        }
+        if (b.type === 'school') body += row('Alunos', sim.citizens.filter(c => c.profession === 'student').length);
+        if (b.type === 'hospital') body += row('Ervas', b.input?.herbs || 0) + row('Doentes', sim.citizens.filter(c => c.sick > 0).length);
+        if (b.type === 'cemetery') body += row('Sepulturas', `${b.graves}/${def.graves * (b.level || 1)}`);
       } else {
         const pan = Object.entries(b.pantry || {}).filter(([, n]) => n > 0).map(([r, n]) => `${n} ${RES_LABEL[r].toLowerCase()}`).join(', ') || 'Vazia';
-        body = row('Despensa', pan) + row('Moradores', `${b.residents.length}/${def.residents}`) + (b.residents.length ? b.residents.map(person).map(x => `<div class="row">${x}</div>`).join('') : '<p class="note">Vazia até haver uma família sem casa.</p>');
+        body = row('Despensa', pan) + row('Moradores', `${b.residents.length}/${sim.population.maxRes(b)}`) + (b.residents.length ? b.residents.map(person).map(x => `<div class="row">${x}</div>`).join('') : '<p class="note">Vazia até haver uma família sem casa.</p>');
       }
       body += `<p class="note">${def.about}</p>`;
+      if (b.done) body += this._upgrade(sim, b, row);
       const label = b.done ? 'Demolir' : 'Cancelar obra';
       body += b.confirm
         ? `<div class="acts"><button class="btn warn" data-act="remove">Confirmar: ${label.toLowerCase()}</button><button class="btn" data-act="keep">Manter</button></div>`
         : `<div class="acts"><button class="btn" data-act="remove">${label}</button></div>`;
     } else if (s.type === 'farm') {
       const f = sim.farming.get(s.id); if (!f) { S.selected = null; return; }
-      title = `Fazenda ${f.w}×${f.h}`;
+      title = `${{ farm: 'Fazenda', orchard: 'Pomar', pasture: 'Pastagem' }[f.kind]} ${f.w}×${f.h}`;
       const cnt = [0, 0, 0, 0]; for (const t of f.tiles) cnt[t.st]++;
       const staff = sim.citizens.filter(c => c.workplace === f.id);
       const fert = Math.round(sim.farming.fertility(f) * 100);
-      body = `<div class="crops">${Object.keys(CROPS).map(k => `<button class="crop ${f.crop === k ? 'on' : ''}" data-act="crop" data-crop="${k}">${RES_LABEL[k]}</button>`).join('')}</div>` +
-        `<p class="note">${RES_LABEL[f.crop]}: colhe em ${CROPS[f.crop].grow / DAY} dias, rende ${CROPS[f.crop].yield} por tile.</p>` +
-        row('Solo fértil', `${fert}%`) + row('Sem preparo', cnt[0]) + row('Prontos para plantar', cnt[1]) + row('Crescendo', cnt[2]) + row('Prontos para colher', cnt[3]) +
+      body = `<div class="crops">${(f.kind === 'pasture' ? [] : f.kind === 'orchard' ? ORCHARD_CROPS : FIELD_CROPS).map(k => `<button class="crop ${f.crop === k ? 'on' : ''}" data-act="crop" data-crop="${k}">${RES_LABEL[k]}</button>`).join('')}</div>` +
+        (f.kind === 'pasture' ? row('Rebanho', `${f.herd} ovelhas`) + row('Lã pronta', Math.floor(f.wool)) :
+        `<p class="note">${RES_LABEL[f.crop]}: colhe em ${CROPS[f.crop].grow / DAY} dias, rende ${CROPS[f.crop].yield} por tile. Parado no inverno.</p>` +
+        row('Solo fértil', `${fert}%`) + row('Sem preparo', cnt[0]) + row('Prontos para plantar', cnt[1]) + row('Crescendo', cnt[2]) + row('Prontos para colher', cnt[3])) +
         `<div class="row"><span>Agricultores</span><b class="step"><button data-act="wk" data-d="-1" aria-label="Menos vagas">−</button>${staff.length}/${f.maxWorkers}<button data-act="wk" data-d="1" aria-label="Mais vagas">+</button></b></div>` +
         (staff.length < f.maxWorkers ? '<p class="note warn">Faltam agricultores. Abra Gestão para definir mais.</p>' : '') +
+        this._upgrade(sim, f, row) +
         (f.confirm ? '<div class="acts"><button class="btn warn" data-act="farmdel">Confirmar remoção</button><button class="btn" data-act="farmkeep">Manter</button></div>' : '<div class="acts"><button class="btn" data-act="farmdel">Remover fazenda</button></div>');
     } else if (s.type === 'node') {
       const n = sim.nodes.get(s.id); if (!n) { S.selected = null; return; }
@@ -337,11 +391,32 @@ export class UIManager {
     $('#inspect .pt').textContent = title;
     this._set('inspectBody', body, $('#inspect .pb'));
   }
+  _staffRows(sim, b, def, person) {
+    const staff = sim.citizens.filter(c => c.workplace === b.id);
+    const max = (b.maxWorkers ?? def.workers) + ((b.level || 1) - 1);
+    return `<div class="row"><span>${PROFESSIONS[def.prof]}</span><b class="step"><button data-act="slots" data-d="-1" aria-label="Menos vagas">−</button>${staff.length}/${max}<button data-act="slots" data-d="1" aria-label="Mais vagas">+</button></b></div>` +
+      (staff.length < max ? '<p class="note warn">Faltam trabalhadores. Abra Gestão.</p>' : '');
+  }
+  _upgrade(sim, b, row) {
+    const C = sim.construction, lv = b.level || 1;
+    let h = `<h5>Tecnologia · nível ${lv}/${LEVEL_MAX}</h5>` + row('Atual', C.techName(b));
+    if (b.up) {
+      const bars = Object.entries(b.up.cost).map(([r, n]) => `<div class="bar"><label>${RES_LABEL[r]} <em>${b.up.delivered[r]}/${n}</em></label><div><i style="width:${(b.up.delivered[r] / n) * 100}%"></i></div></div>`).join('');
+      const p = C.progress(b);
+      return `${h}${bars}<div class="bar work"><label>Melhoria <em>${Math.round(p * 100)}%</em></label><div><i style="width:${p * 100}%"></i></div></div><div class="acts"><button class="btn" data-act="upx">Cancelar melhoria</button></div>`;
+    }
+    if (lv >= LEVEL_MAX) return h;
+    const cost = Object.entries(C.upgradeCost(b)).map(([r, n]) => `${n} ${RES_LABEL[r].toLowerCase()}`).join(', ');
+    const v = C.canUpgrade(b);
+    h += `<p class="note">Próximo: ${C.techName(b, lv + 1)}. Custa ${cost}.${v.ok ? '' : ` ${v.reason}`}</p><div class="acts"><button class="btn go" data-act="up" ${v.ok ? '' : 'disabled'}>Melhorar</button></div>`;
+    return h;
+  }
   _manage(sim) {
     const P = sim.population;
     const rows = Object.entries(PROFESSIONS).map(([k, l]) => {
       const n = P.count(k);
-      const note = k === 'laborer' ? 'Corta, minera e carrega' : k === 'builder' ? 'Só eles erguem obras' : k === 'farmer' ? 'Trabalham nas fazendas' : 'Trabalham nas cabanas de coleta';
+      if (n === 0 && !['laborer', 'builder'].includes(k) && !sim.farming.places(k).length) return '';
+      const note = PROF_NOTE[k];
       const ctl = k === 'laborer' ? `<b class="step solo">${n}</b>` : `<b class="step"><button data-prof="${k}" data-d="-1" aria-label="Menos ${l}">−</button>${n}<button data-prof="${k}" data-d="1" aria-label="Mais ${l}">+</button></b>`;
       return `<div class="prof"><span><b>${l}</b><em>${note}</em></span>${ctl}</div>`;
     }).join('');
@@ -371,11 +446,26 @@ export class UIManager {
       <div class="row"><span>Celeiros</span><b>${capF}</b></div>
       <div class="row"><span>Comida dura cerca de</span><b>${days >= 99 ? '99+' : Math.floor(days)} dias</b></div>
       <div class="tw"><table><thead><tr><th>Recurso</th><th>Guardado</th><th>Casas</th><th>Chão</th></tr></thead><tbody>${RES.map(stockRow).join('')}</tbody></table></div>
+      ${this._report(sim)}
       <h3>Crônica</h3><ul class="log">${log}</ul>`;
     this._set('manageBody', html, $('#manage .pb'));
   }
+  _report(sim) {
+    if (!sim.buildings.some(b => b.done && b.type === 'townhall')) return '<h3>Relatórios</h3><p class="note">Construa a Prefeitura para ver produção, consumo e gráficos.</p>';
+    const R = sim.reports;
+    if (R.length < 2) return '<h3>Relatórios</h3><p class="note">Os dados aparecem depois de alguns dias.</p>';
+    const last = R[R.length - 1], base = R[Math.max(0, R.length - 7)];
+    const rows = RES.map(r => {
+      const p = last.p[r] - (base.p[r] || 0), c = last.c[r] - (base.c[r] || 0);
+      return p || c ? `<tr><td>${RES_LABEL[r]}</td><td>${p || '–'}</td><td>${c || '–'}</td></tr>` : '';
+    }).join('');
+    const line = (key, col) => { const m = Math.max(10, ...R.map(x => x[key])); return `<polyline style="stroke:${col}" points="${R.map((x, i) => `${(i / (R.length - 1)) * 280},${44 - (x[key] / m) * 40}`).join(' ')}"/>`; };
+    return `<h3>Relatórios</h3><svg class="spark" viewBox="0 0 280 46" role="img" aria-label="Estoque ao longo do tempo">${line('food', '#e2733a')}${line('wood', '#e0c078')}${line('firewood', '#8fb6c4')}</svg>
+      <p class="note"><span style="color:#e2733a">comida</span> · <span style="color:#e0c078">madeira</span> · <span style="color:#8fb6c4">lenha</span></p>
+      <div class="tw"><table><thead><tr><th>Último ano</th><th>Feito</th><th>Gasto</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
   _people(sim) {
-    const html = sim.citizens.map(c => `<button class="person" data-c="${c.id}"><img src="${this.look(c)}" alt=""><span><b>${esc(c.name)}</b><em>${Math.floor(c.age)} anos · ${PROFESSIONS[c.profession] || 'Criança'} · ${esc(sim.jobs.describe(c))}</em></span></button>`).join('');
+    const html = sim.citizens.map(c => `<button class="person" data-c="${c.id}"><img src="${this.look(c)}" alt=""><span><b>${esc(c.name)}</b><em>${Math.floor(c.age)} anos · ${PROFESSIONS[c.profession] || (c.profession === 'student' ? 'Estudante' : 'Criança')} · ${esc(sim.jobs.describe(c))}</em></span></button>`).join('');
     this._set('peopleBody', html, $('#people .pb'));
   }
   look(c) {

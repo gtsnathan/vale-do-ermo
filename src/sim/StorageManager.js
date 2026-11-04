@@ -7,19 +7,22 @@ export class StorageManager {
   stores() { return this.sim.buildings.filter(b => b.done && BUILDINGS[b.type].stores); }
   depots() { return this.sim.buildings.filter(b => b.done && b.type === 'depot'); }
   barns() { return this.sim.buildings.filter(b => b.done && b.type === 'barn'); }
-  accepts(b, res) { return BUILDINGS[b.type].stores === (isFood(res) ? 'food' : 'material'); }
+  // takes: recebe carga comum. accepts: pode conter (mercado e posto guardam de tudo).
+  takes(b, res) { return BUILDINGS[b.type].stores === (isFood(res) ? 'food' : 'material'); }
+  accepts(b, res) { const k = BUILDINGS[b.type].stores; return k === 'market' || k === 'trade' || this.takes(b, res); }
+  cap(b) { return Math.round(BUILDINGS[b.type].capacity * (1 + 0.6 * ((b.level || 1) - 1))); }
   used(d) { return RES.reduce((a, r) => a + d.stock[r], 0); }
-  free(d) { return BUILDINGS[d.type].capacity - this.used(d) - d.incoming; }
+  free(d) { return this.cap(d) - this.used(d) - d.incoming; }
   available(d, res) { return d.stock[res] - d.reserved[res]; }
-  total(res) { return this.stores().reduce((a, d) => a + d.stock[res], 0); }
+  total(res) { return this.stores().filter(d => BUILDINGS[d.type].stores !== 'trade').reduce((a, d) => a + d.stock[res], 0); }
   _ofKind(kind) { return this.stores().filter(b => BUILDINGS[b.type].stores === kind); }
-  capacity(kind = 'material') { return this._ofKind(kind).reduce((a, b) => a + BUILDINGS[b.type].capacity, 0); }
+  capacity(kind = 'material') { return this._ofKind(kind).reduce((a, b) => a + this.cap(b), 0); }
   usedTotal(kind = 'material') { return this._ofKind(kind).reduce((a, d) => a + this.used(d), 0); }
   // Local acessível mais próximo que aceita o recurso e tem espaço, contando cargas a caminho.
   nearestWithSpace(x, y, comp, res) {
     let best = null, bd = Infinity;
     for (const d of this.stores()) {
-      if (!this.accepts(d, res) || this.free(d) <= 0 || this.sim.world.compAt(d.door.x, d.door.y) !== comp) continue;
+      if (!this.takes(d, res) || this.free(d) <= 0 || this.sim.world.compAt(d.door.x, d.door.y) !== comp) continue;
       const dd = Math.abs(d.door.x - x) + Math.abs(d.door.y - y);
       if (dd < bd) { bd = dd; best = d; }
     }
@@ -28,9 +31,20 @@ export class StorageManager {
   // Celeiro acessível mais próximo com comida livre.
   nearestFood(x, y, comp) {
     let best = null, bd = Infinity;
-    for (const d of this.barns()) {
+    for (const d of this.stores()) {
+      if (BUILDINGS[d.type].stores === 'trade' || BUILDINGS[d.type].stores === 'material') continue;
       if (this.sim.world.compAt(d.door.x, d.door.y) !== comp) continue;
       if (!RES.some(r => isFood(r) && this.available(d, r) > 0)) continue;
+      const dd = Math.abs(d.door.x - x) + Math.abs(d.door.y - y);
+      if (dd < bd) { bd = dd; best = d; }
+    }
+    return best;
+  }
+  // Lugar mais próximo com certa mercadoria livre (nunca o posto comercial).
+  nearestWith(x, y, comp, res) {
+    let best = null, bd = Infinity;
+    for (const d of this.stores()) {
+      if (BUILDINGS[d.type].stores === 'trade' || this.available(d, res) <= 0 || this.sim.world.compAt(d.door.x, d.door.y) !== comp) continue;
       const dd = Math.abs(d.door.x - x) + Math.abs(d.door.y - y);
       if (dd < bd) { bd = dd; best = d; }
     }

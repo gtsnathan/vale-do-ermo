@@ -82,11 +82,15 @@ function materials() {
     j2[y * SIZE + x] = (tiled(n, x + 77, y + 33, 1 / 15) - 0.5) * 1.25 + (hash(x >> 1, y >> 1, 82) - 0.5) * 0.25;
     macro[y * SIZE + x] = tiled(n, x + 170, y + 90, 1 / 42);
   }
-  cache = { grassA, grassB, floor, soil, sand, rock, deep, shallow, ford, j1, j2, macro };
+  const snow = table((x, y) => { const v = tiled(n, x + 30, y + 44, 1 / 18); return v < 0.42 ? 0xd9e2ea : v < 0.6 ? 0xe6ecf1 : 0xf2f5f7; });
+  stamp(snow, 700, 18, (x, y, put) => { put(x, y, 0xc6d2de); put(x + 1, y, 0xffffff); });
+  const ice = table((x, y) => { const v = tiled(n, x + 60, y + 14, 1 / 24); return v < 0.45 ? 0x9fc2d1 : v < 0.6 ? 0xb2d1dc : 0xc6dfe6; });
+  dashes(ice, 340, 19, 0xe6f3f6);
+  cache = { snow, ice, grassA, grassB, floor, soil, sand, rock, deep, shallow, ford, j1, j2, macro };
   return cache;
 }
 
-export function bakeCell(world, cx, cy, out, W, H) {
+export function bakeCell(world, cx, cy, out, W, H, season = 0) {
   const M = materials();
   const { terrain, forest, shore, w, h } = world;
   const VOID = rgb(0x12171a);
@@ -103,13 +107,19 @@ export function bakeCell(world, cx, cy, out, W, H) {
       const tx = Math.max(0, Math.min(w - 1, Math.floor(u + M.j1[q]))), ty = Math.max(0, Math.min(h - 1, Math.floor(v + M.j2[q])));
       const i = ty * w + tx, t = terrain[i], sh = shore[i];
       let col;
-      if (t === T.WATER) col = sh <= -2 ? M.deep[q] : M.shallow[q];
+      if (t === T.WATER) col = season === 3 ? (sh <= -3 ? M.deep[q] : M.ice[q]) : sh <= -2 ? M.deep[q] : M.shallow[q];
       else if (t === T.FORD) col = M.ford[q];
       else if (t === T.MOUNTAIN) col = M.rock[q];
       else if (sh === 1) col = M.sand[q];
       else if (t === T.FERTILE) col = M.soil[q];
       else if (forest[i]) col = M.floor[q];
       else col = M.macro[q] > 0.5 ? M.grassA[q] : M.grassB[q];
+      if (season === 3 && t !== T.WATER && t !== T.FORD && M.j1[((qy * 3 & MASK) << 8) | (qx * 3 & MASK)] > -0.42) col = M.snow[q];
+      else if (t === T.GRASS && season === 2 && sh !== 1) {
+        // Outono: puxa o verde para ocre mantendo o desenho do chão.
+        const r = col & 255, g = (col >> 8) & 255, b = (col >> 16) & 255;
+        col = (0xff000000 | (Math.max(0, b * 0.72) << 16) | (Math.min(255, g * 0.9) << 8) | Math.min(255, r * 1.25 + 16)) >>> 0;
+      }
       out[o] = col;
     }
   }

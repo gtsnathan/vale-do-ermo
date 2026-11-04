@@ -1,4 +1,4 @@
-import { BUILDINGS, RES } from './defs.js';
+import { BUILDINGS, FARM_COST, LEVEL_MAX, RES, TECH } from './defs.js';
 
 // Canteiros, conclusão, cancelamento e demolição.
 export class ConstructionManager {
@@ -55,41 +55,95 @@ export class ConstructionManager {
     if (W.inb(b.door.x, b.door.y)) W.doorAt[W.idx(b.door.x, b.door.y)]++;
     W.compDirty = true;
   }
+  // Obra em andamento: canteiro novo ou melhoria de construção pronta.
+  proj(b) { if (!b) return null; return b.done === false ? b : b.up || null; }
+  costOf(b) { return b.done === false ? BUILDINGS[b.type].cost : b.up.cost; }
+  workOf(b) { return b.done === false ? BUILDINGS[b.type].work : b.up.total; }
   needs(b, res) {
-    const cost = BUILDINGS[b.type].cost[res] || 0;
-    return cost - b.delivered[res] - b.enroute[res];
+    const p = this.proj(b);
+    return (this.costOf(b)[res] || 0) - p.delivered[res] - p.enroute[res];
   }
   materialsComplete(b) {
-    const cost = BUILDINGS[b.type].cost;
-    return Object.keys(cost).every(r => b.delivered[r] >= cost[r]);
+    const cost = this.costOf(b), p = this.proj(b);
+    return Object.keys(cost).every(r => p.delivered[r] >= cost[r]);
   }
   progress(b) {
-    if (b.done) return 1;
-    return Math.min(1, b.work / BUILDINGS[b.type].work);
+    const p = this.proj(b);
+    return p ? Math.min(1, p.work / this.workOf(b)) : 1;
   }
   addWork(b, dt) {
-    b.work += dt;
-    if (b.work >= BUILDINGS[b.type].work) this.finish(b);
+    const p = this.proj(b);
+    p.work += dt;
+    if (p.work < this.workOf(b)) return;
+    if (b.done === false) this.finish(b); else this._finishUp(b);
+  }
+  techName(b, level = b.level || 1) {
+    const key = b.kind || b.type;
+    return (TECH[key] || ['Básico', 'Melhorado', 'Avançado'])[level - 1];
+  }
+  upgradeCost(b) {
+    const base = b.kind ? FARM_COST : BUILDINGS[b.type].cost, to = (b.level || 1) + 1, out = {};
+    for (const r in base) out[r] = Math.ceil(base[r] * (to === 2 ? 0.7 : 1.1));
+    out.stone = (out.stone || 0) + (to === 2 ? 4 : 10);
+    if (to === 3) out.iron = 4;
+    return out;
+  }
+  // Nível 3 exige conhecimento: a vila precisa de uma escola funcionando.
+  canUpgrade(b) {
+    if ((b.level || 1) >= LEVEL_MAX) return { ok: false, reason: 'Já está no nível máximo.' };
+    if (b.up) return { ok: false, reason: 'Já há uma melhoria em andamento.' };
+    if (b.done === false) return { ok: false, reason: 'Termine a obra primeiro.' };
+    if ((b.level || 1) === 2 && !this.sim.work.schools().length) return { ok: false, reason: 'A tecnologia do nível 3 exige uma escola.' };
+    return { ok: true };
+  }
+  startUpgrade(b) {
+    const v = this.canUpgrade(b);
+    if (!v.ok) return v;
+    const up = { to: (b.level || 1) + 1, cost: this.upgradeCost(b), total: 22 + 14 * (b.level || 1), work: 0, delivered: {}, enroute: {}, builders: [] };
+    for (const r of RES) { up.delivered[r] = 0; up.enroute[r] = 0; }
+    b.up = up;
+    return { ok: true };
+  }
+  cancelUpgrade(b) {
+    if (!b.up) return;
+    const up = b.up, S = this.sim, at = b.door || { x: b.x, y: b.y };
+    for (const c of S.citizens) if (c.task?.siteId === b.id) S.jobs.abort(c);
+    b.up = null;
+    for (const r of RES) if (up.delivered[r] > 0) S.resources.drop(at.x, at.y, r, up.delivered[r]);
+  }
+  _finishUp(b) {
+    const up = b.up, S = this.sim;
+    for (const r of RES) S.stats.consumed[r] += up.delivered[r];
+    b.level = up.to;
+    b.up = null;
+    for (const c of S.citizens) if (c.task?.siteId === b.id) S.jobs.abort(c);
+    S.population.news('good', `${b.kind ? 'Fazenda' : BUILDINGS[b.type].name} melhorou: ${this.techName(b)}.`);
+    S.events.push({ t: 'upgraded', id: b.id });
+    if (BUILDINGS[b.type]?.residents) S.population.assignHomes();
   }
   finish(b) {
     b.done = true;
     for (const r of RES) { this.sim.stats.consumed[r] += b.delivered[r]; b.delivered[r] = 0; }
     b.builders = [];
     if (BUILDINGS[b.type].stores) this.sim.storage.newStock(b);
-    if (b.type === 'house') b.pantry = {};
+    if (BUILDINGS[b.type].residents) b.pantry = {};
+    if (BUILDINGS[b.type].recipe || BUILDINGS[b.type].keep) b.input = {};
+    if (b.type === 'cemetery') b.graves = 0;
     this.sim.stats.built[b.type] = (this.sim.stats.built[b.type] || 0) + 1;
     this.sim.events.push({ t: 'built', id: b.id });
-    if (b.type === 'house') this.sim.population.assignHomes();
+    if (BUILDINGS[b.type].residents) this.sim.population.assignHomes();
     this.sim.jobs.abortFor(b.id);
   }
   // Cancela uma obra ou demole uma construção. Todo material volta ao chão.
-  remove(b) {
+  remove(b, burned = false) {
     const S = this.sim, W = S.world;
+    this.cancelUpgrade(b);
     S.jobs.abortFor(b.id);
     if (BUILDINGS[b.type].stores && b.done) for (const r of RES) if (b.stock[r] > 0) S.resources.drop(b.door.x, b.door.y, r, b.stock[r]);
+    if (b.input) for (const r in b.input) if (b.input[r] > 0) S.resources.drop(b.door.x, b.door.y, r, b.input[r]);
     if (b.pantry) for (const r in b.pantry) if (b.pantry[r] > 0) S.resources.drop(b.door.x, b.door.y, r, b.pantry[r]);
     if (!b.done) for (const r of RES) if (b.delivered[r] > 0) S.resources.drop(b.door.x, b.door.y, r, b.delivered[r]);
-    if (b.done) {
+    if (b.done && !burned) {
       const cost = BUILDINGS[b.type].cost;
       for (const r in cost) {
         const back = Math.floor(cost[r] / 2);

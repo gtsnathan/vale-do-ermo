@@ -11,7 +11,8 @@ async function open(ctxOpts) {
   const page = await ctx.newPage();
   const errs = [];
   page.on('pageerror', e => errs.push(`pageerror ${e.message}`));
-  page.on('console', m => { if (m.type() === 'error' && !/fonts|ERR_|Failed to load resource/.test(m.text())) errs.push(m.text()); });
+  page.on('console', m => { if (/Sprite ausente/.test(m.text())) errs.push(m.text());
+    if (m.type() === 'error' && !/fonts|ERR_|Failed to load resource/.test(m.text())) errs.push(m.text()); });
   await page.route('**/*', r => {
     const u = r.request().url();
     if (u.includes('phaser.min.js')) return r.fulfill({ body: phaser, contentType: 'text/javascript' });
@@ -31,7 +32,7 @@ const tileXY = (page, x, y) => page.evaluate(([x, y]) => {
 }, [x, y]);
 
 (async () => {
-  const { browser, page, errs } = await open({ viewport: { width: 1280, height: 760 } });
+  const { browser, page, errs } = await open({ viewport: { width: 1280, height: 700 } });
   await page.screenshot({ path: `${OUT}/1-menu.png` });
   await page.fill('#m-seed', '4711');
   await page.click('#m-new');
@@ -52,6 +53,7 @@ const tileXY = (page, x, y) => page.evaluate(([x, y]) => {
   // Centraliza a mata e marca arrastando.
   await page.evaluate(({ first }) => __ermo.scene.camMgr.centerTile(first.x, first.y), info);
   await page.waitForTimeout(200);
+  await page.click('#goals');
   await page.click('#t-trees');
   const a = await tileXY(page, info.first.x - 4 + 0.5, info.first.y - 4 + 0.5), b = await tileXY(page, info.first.x + 4 + 0.5, info.first.y + 4 + 0.5);
   await page.mouse.move(a[0], a[1]); await page.mouse.down(); await page.mouse.move((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, { steps: 4 }); await page.mouse.move(b[0], b[1], { steps: 4 });
@@ -77,7 +79,23 @@ const tileXY = (page, x, y) => page.evaluate(([x, y]) => {
   console.log('casas:', JSON.stringify(house));
   if (house.length !== 1) throw new Error('clique não criou a casa');
 
-  const wait = (fn, label, ms = 150000) => page.waitForFunction(fn, null, { timeout: ms }).then(() => console.log('✓', label));
+  // Avança a simulação direto, sem depender da taxa de quadros do navegador sem GPU.
+  const wait = async (fn, label) => {
+    const ok = await page.evaluate(async src => {
+      const test = eval(src); const s = __ermo.sim;
+      for (let i = 0; i < 4000; i++) {
+        if (test()) return true;
+        for (let k = 0; k < 200 && !test(); k++) s.step();
+        await new Promise(r => setTimeout(r, 0));
+        if (i % 4 === 0) await new Promise(r => requestAnimationFrame(r));
+      }
+      return false;
+    }, fn.toString());
+    if (errs.length) throw new Error(errs.join('; '));
+    if (!ok) throw new Error('não aconteceu: ' + label);
+    await page.waitForTimeout(150);
+    console.log('✓', label);
+  };
   // Acelera em 5× e acompanha o estado real em cada fase.
   await page.click('.sp[data-s="5"]');
   await wait(() => { const b = __ermo.sim.buildings.find(b => b.type === 'house'); return b.delivered.wood >= 4; }, 'madeira chegando ao canteiro');
@@ -96,7 +114,7 @@ const tileXY = (page, x, y) => page.evaluate(([x, y]) => {
   await wait(() => __ermo.sim.stats.produced.wood > 0, 'árvore cortada');
   await wait(() => __ermo.sim.stats.produced.wood >= 9 && __ermo.sim.piles.length === 0, 'madeira transportada ao depósito');
   await wait(() => __ermo.sim.isNight(), 'anoiteceu');
-  await page.waitForFunction(() => { const s = __ermo.sim; const b = s.buildings.find(b => b.type === 'house'); return b.residents.every(id => s.citizen(id).inside); }, null, { timeout: 60000 });
+  await wait(() => { const s = __ermo.sim; const b = s.buildings.find(b => b.type === 'house'); return b.residents.every(id => s.citizen(id).inside); }, 'moradores em casa');
   await page.click('.sp[data-s="1"]');
   await page.evaluate(() => { const b = __ermo.sim.buildings.find(b => b.type === 'house'); __ermo.scene.camMgr.centerTile(b.x + 1, b.y + 1); __ermo.scene.cameras.main.setZoom(2); });
   await page.waitForTimeout(600);
@@ -122,29 +140,42 @@ const tileXY = (page, x, y) => page.evaluate(([x, y]) => {
   if (await page.evaluate(() => __ermo.sim.population.count('farmer')) !== 2) throw new Error('botão de profissão falhou');
   console.log('✓ 2 agricultores pelo painel');
   await page.click('.sp[data-s="5"]');
-  await wait(() => __ermo.sim.farms[0].tiles.some(t => t.st === 2), 'terra preparada e plantada', 200000);
-  await page.waitForFunction(() => !__ermo.sim.isNight(), null, { timeout: 120000 });
-  await page.waitForFunction(() => __ermo.sim.farms[0].tiles.filter(t => t.st === 2).length >= 10, null, { timeout: 200000 });
+  await wait(() => __ermo.sim.farms[0].tiles.some(t => t.st === 2), 'terra preparada e plantada');
+  await wait(() => !__ermo.sim.isNight(), 'amanheceu');
+  await wait(() => __ermo.sim.farms[0].tiles.filter(t => t.st === 2).length >= 10, '10 canteiros crescendo');
   await page.click('.sp[data-s="1"]'); await page.waitForTimeout(500);
   await page.screenshot({ path: `${OUT}/b-farm-growing.png` });
   await page.click('.sp[data-s="5"]');
-  await wait(() => __ermo.sim.farms[0].tiles.some(t => t.st === 3), 'plantas maduras', 300000);
+  await wait(() => __ermo.sim.farms[0].tiles.some(t => t.st === 3), 'plantas maduras');
   await page.click('.sp[data-s="1"]'); await page.waitForTimeout(500);
   await page.screenshot({ path: `${OUT}/c-farm-ripe.png` });
   await page.click('.sp[data-s="5"]');
-  await wait(() => { const b = __ermo.sim.storage.barns()[0]; return b.stock.beans > 40 || __ermo.sim.stats.produced.beans >= 8; }, 'feijão colhido', 300000);
+  await wait(() => { const b = __ermo.sim.storage.barns()[0]; return b.stock.beans > 40 || __ermo.sim.stats.produced.beans >= 8; }, 'feijão colhido');
   await page.click('.sp[data-s="1"]');
   await page.waitForTimeout(400);
   await page.screenshot({ path: `${OUT}/d-manage.png` });
   // v0.3: espera o primeiro bebê nascer da casa construída no jogo.
   await page.click('.sp[data-s="10"]');
-  await wait(() => __ermo.sim.stats.births > 0, 'primeiro bebê nasceu', 400000);
+  await wait(() => __ermo.sim.stats.births > 0, 'primeiro bebê nasceu');
   await page.click('.sp[data-s="1"]');
   await page.evaluate(() => { const S = __ermo.scene, k = S.sim.citizens.find(c => c.parents.length); S.selected = { type: 'citizen', id: k.id }; S.camMgr.centerTile(k.x, k.y); S.cameras.main.setZoom(2); });
-  await page.waitForFunction(() => { const k = __ermo.sim.citizens.find(c => c.parents.length); return !k.inside; }, null, { timeout: 200000 });
+  await wait(() => { const k = __ermo.sim.citizens.find(c => c.parents.length); return !k.inside; }, 'bebê fora de casa');
   await page.evaluate(() => { const S = __ermo.scene, k = S.sim.citizens.find(c => c.parents.length); S.camMgr.centerTile(k.x, k.y); });
   await page.waitForTimeout(600);
   await page.screenshot({ path: `${OUT}/e-baby.png` });
+  // Novidades: esperar o outono e o inverno, melhorar o depósito.
+  await page.evaluate(() => { const S = __ermo.scene, d = S.sim.storage.depots()[0]; S.selected = { type: 'building', id: d.id }; S.camMgr.centerTile(d.x + 2, d.y + 3); S.cameras.main.setZoom(1.25); });
+  await page.waitForTimeout(600);
+  await page.click('[data-act="up"]');
+  await page.click('.sp[data-s="10"]');
+  await wait(() => __ermo.sim.storage.depots()[0].level === 2, 'depósito melhorou');
+  await wait(() => __ermo.sim.season.index() === 2, 'outono');
+  await page.click('.sp[data-s="1"]'); await page.waitForTimeout(9000);
+  await page.screenshot({ path: `${OUT}/f-autumn.png` });
+  await page.click('.sp[data-s="10"]');
+  await wait(() => __ermo.sim.season.index() === 3, 'inverno');
+  await page.click('.sp[data-s="1"]'); await page.waitForTimeout(9000);
+  await page.screenshot({ path: `${OUT}/g-winter.png` });
   await page.click('#manage .px');
   // Clique no aldeão/edifício abre painel.
   await page.evaluate(() => { const b = __ermo.sim.buildings.find(b => b.type === 'house'); __ermo.scene.selected = { type: 'building', id: b.id }; });
@@ -201,3 +232,4 @@ const tileXY = (page, x, y) => page.evaluate(([x, y]) => {
   console.log('overflow horizontal:', overflow, 'erros celular:', m.errs.length ? m.errs : 'nenhum');
   await m.browser.close();
 })().catch(e => { console.error('FALHOU', e); process.exit(1); });
+process.on('exit', () => {});

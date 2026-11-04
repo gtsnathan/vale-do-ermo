@@ -1,4 +1,4 @@
-import { BUILDINGS, CROPS, FARM_MAX, FARM_MIN, FORAGE_RADIUS, DAY, T } from './defs.js';
+import { ORCHARD_CROPS, PROFESSIONS, BUILDINGS, CROPS, FARM_MAX, FARM_MIN, FORAGE_RADIUS, DAY, T } from './defs.js';
 
 // Fazendas, cabanas de coleta e distribuição de agricultores e coletores.
 export class FarmingManager {
@@ -25,15 +25,17 @@ export class FarmingManager {
     if (!reach) return { ok: false, reason: 'Os aldeões não conseguem chegar aqui' };
     return { ok: true };
   }
-  place(x0, y0, x1, y1, crop = 'potato') {
+  place(x0, y0, x1, y1, crop = 'potato', kind = 'farm') {
     const v = this.validate(x0, y0, x1, y1);
     if (!v.ok) return v;
     const W = this.sim.world, S = this.sim;
-    const f = { id: S.newId(), x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1, crop, tiles: [], maxWorkers: 1, cooldown: 0 };
+    const f = { id: S.newId(), x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1, crop, kind, tiles: [], maxWorkers: 1, cooldown: 0 };
+    if (kind === 'pasture') { f.herd = 2; f.wool = 0; f.crop = null; }
+    if (kind === 'orchard') f.crop = ORCHARD_CROPS.includes(crop) ? crop : 'apple';
     f.maxWorkers = Math.min(4, Math.max(1, Math.round((f.w * f.h) / 16)));
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
       W.fieldAt[W.idx(x, y)] = f.id;
-      f.tiles.push({ x, y, st: 0, g: 0, crop: null, reservedBy: null });
+      f.tiles.push({ x, y, st: kind === 'pasture' ? -1 : 0, g: 0, crop: null, reservedBy: null });
     }
     S.farms.push(f);
     S.stats.placed.farm = (S.stats.placed.farm || 0) + 1;
@@ -42,6 +44,7 @@ export class FarmingManager {
   }
   remove(f) {
     const S = this.sim, W = S.world;
+    S.construction.cancelUpgrade(f);
     for (const c of S.citizens) {
       if (c.task?.farmId === f.id) S.jobs.abort(c);
       if (c.workplace === f.id) c.workplace = null;
@@ -53,13 +56,16 @@ export class FarmingManager {
   workers(place) { return this.sim.citizens.filter(c => c.workplace === place.id).length; }
   // Ordem de trabalho: colher, plantar, preparar. Pega o tile mais perto.
   pickTile(f, c, comp) {
-    const W = this.sim.world;
+    const W = this.sim.world, season = this.sim.season.index();
     let best = -1, bs = Infinity;
     const carrying = c.inv.res;
     const left = carrying ? 6 - c.inv.amount : 6;
     for (let i = 0; i < f.tiles.length; i++) {
       const t = f.tiles[i];
-      if (t.reservedBy != null || t.st === 2) continue;
+      if (t.reservedBy != null || t.st === 2 || t.st === -1) continue;
+      if (t.st === 0 && season === 3) continue;
+      if (t.st === 1 && season >= 2 && !CROPS[f.crop].tree) continue;
+      if (t.st === 1 && season === 3) continue;
       if (carrying && (t.st !== 3 || t.crop !== carrying || this.tileYield(t) > left)) continue;
       if (W.comp[W.idx(t.x, t.y)] !== comp) continue;
       const rank = t.st === 3 ? 0 : t.st === 1 ? 1000 : 2000;
@@ -70,7 +76,10 @@ export class FarmingManager {
   }
   tileYield(t) {
     const W = this.sim.world, base = CROPS[t.crop].yield;
-    return W.terrain[W.idx(t.x, t.y)] === T.FERTILE ? Math.ceil(base * 1.5) : base;
+    const y = W.terrain[W.idx(t.x, t.y)] === T.FERTILE ? Math.ceil(base * 1.5) : base;
+    const f = this.get(W.fieldAt[W.idx(t.x, t.y)]);
+    const up = f ? Math.ceil(y * (1 + 0.3 * ((f.level || 1) - 1))) : y;
+    return this.sim.badHarvest ? Math.max(1, Math.floor(up / 2)) : up;
   }
   fertility(f) {
     const W = this.sim.world;
@@ -85,48 +94,86 @@ export class FarmingManager {
       const y = this.tileYield(t);
       S.stats.produced[t.crop] += y;
       c.inv.res = t.crop; c.inv.amount += y;
-      t.st = 1; t.crop = null; t.g = 0;
+      if (CROPS[t.crop].tree) { t.st = 2; t.g = 0; }
+      else { t.st = 1; t.crop = null; t.g = 0; }
     }
     S.events.push({ t: 'crop', farmId: f.id, i });
   }
   // Roda uma vez por segundo de jogo.
   tick() {
-    for (const f of this.sim.farms) for (let i = 0; i < f.tiles.length; i++) {
-      const t = f.tiles[i];
-      if (t.st !== 2) continue;
-      const grow = CROPS[t.crop].grow, a = Math.floor((t.g / grow) * 3);
-      t.g += 1;
-      if (t.g >= grow) { t.st = 3; this.sim.events.push({ t: 'crop', farmId: f.id, i }); }
-      else if (Math.floor((t.g / grow) * 3) !== a) this.sim.events.push({ t: 'crop', farmId: f.id, i });
+    const S = this.sim, winter = S.season.index() === 3;
+    for (const f of S.farms) {
+      if (f.kind === 'pasture') {
+        f.wool += f.herd * (f.level || 1) * (2 / (DAY * 6));
+        const cap = Math.max(2, Math.floor((f.w * f.h) / 6));
+        if (S.season.index() === 0 && f.herd < cap && S.rng.next() < f.herd * 0.25 / (DAY * 1.5)) f.herd++;
+        continue;
+      }
+      for (let i = 0; i < f.tiles.length; i++) {
+        const t = f.tiles[i];
+        if (t.st !== 2) continue;
+        if (winter && !CROPS[t.crop].tree) continue;
+        if (winter) continue;
+        const grow = CROPS[t.crop].grow, a = Math.floor((t.g / grow) * 3);
+        t.g += 1;
+        if (t.g >= grow) { t.st = 3; S.events.push({ t: 'crop', farmId: f.id, i }); }
+        else if (Math.floor((t.g / grow) * 3) !== a) S.events.push({ t: 'crop', farmId: f.id, i });
+      }
     }
     this.balance();
+  }
+  // A geada mata o que não foi colhido. Pomares só perdem os frutos.
+  frost() {
+    const S = this.sim;
+    let lost = 0;
+    for (const f of S.farms) for (let i = 0; i < f.tiles.length; i++) {
+      const t = f.tiles[i];
+      if (t.st < 2 || !t.crop) continue;
+      if (CROPS[t.crop].tree) { if (t.st === 3) { t.st = 2; t.g = 0; lost++; S.events.push({ t: 'crop', farmId: f.id, i }); } continue; }
+      lost++;
+      t.st = 1; t.crop = null; t.g = 0; t.reservedBy = null;
+      S.events.push({ t: 'crop', farmId: f.id, i });
+    }
+    if (lost) S.population.news('warn', `A geada destruiu ${lost} canteiros que não foram colhidos.`);
+  }
+  places(prof) {
+    const S = this.sim;
+    const out = S.buildings.filter(b => b.done && BUILDINGS[b.type].prof === prof).map(b => ({ ref: b, max: (b.maxWorkers ?? BUILDINGS[b.type].workers) + ((b.level || 1) - 1) }));
+    if (prof === 'farmer') for (const f of S.farms) if (f.kind !== 'pasture') out.push({ ref: f, max: f.maxWorkers });
+    if (prof === 'herder') for (const f of S.farms) if (f.kind === 'pasture') out.push({ ref: f, max: f.maxWorkers });
+    return out;
   }
   // Cada profissional recebe automaticamente um local com vaga.
   balance() {
     const S = this.sim;
-    const places = { farmer: S.farms.map(f => ({ ref: f, max: f.maxWorkers })), gatherer: S.buildings.filter(b => b.done && b.type === 'gatherer').map(b => ({ ref: b, max: BUILDINGS.gatherer.workers })) };
-    for (const prof of ['farmer', 'gatherer']) {
+    for (const prof of Object.keys(PROFESSIONS)) {
+      if (prof === 'laborer' || prof === 'builder') continue;
+      const places = this.places(prof);
       const list = S.citizens.filter(c => c.profession === prof);
-      const count = new Map(places[prof].map(p => [p.ref.id, 0]));
+      if (!list.length) continue;
+      const count = new Map(places.map(p => [p.ref.id, 0]));
       for (const c of list) {
-        const p = places[prof].find(q => q.ref.id === c.workplace);
+        const p = places.find(q => q.ref.id === c.workplace);
         if (!p || count.get(p.ref.id) >= p.max) c.workplace = null;
         else count.set(p.ref.id, count.get(p.ref.id) + 1);
       }
       for (const c of list) {
         if (c.workplace != null) continue;
-        const p = places[prof].filter(q => count.get(q.ref.id) < q.max).sort((a, b) => count.get(a.ref.id) - count.get(b.ref.id))[0];
+        const p = places.filter(q => count.get(q.ref.id) < q.max).sort((a, b) => count.get(a.ref.id) - count.get(b.ref.id))[0];
         if (!p) break;
         c.workplace = p.ref.id; count.set(p.ref.id, count.get(p.ref.id) + 1);
       }
     }
   }
   vacancies() {
-    const S = this.sim;
-    let farm = 0, gather = 0;
-    for (const f of S.farms) farm += Math.max(0, f.maxWorkers - this.workers(f));
-    for (const b of S.buildings) if (b.done && b.type === 'gatherer') gather += Math.max(0, BUILDINGS.gatherer.workers - this.workers(b));
-    return { farm, gather };
+    const out = {};
+    for (const prof of Object.keys(PROFESSIONS)) {
+      if (prof === 'laborer' || prof === 'builder') continue;
+      let n = 0;
+      for (const p of this.places(prof)) n += Math.max(0, p.max - this.workers(p.ref));
+      if (n) out[prof] = n;
+    }
+    return out;
   }
   forestAround(hut) {
     const W = this.sim.world;

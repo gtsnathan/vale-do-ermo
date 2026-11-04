@@ -1,7 +1,7 @@
 import { buildAll } from '../art/sprites.js';
 import { bakeCell, CELL_H, CELL_W } from '../art/terrainBake.js';
 import { hash } from '../art/pix.js';
-import { BUILDINGS, CROPS, DAY, RES, STEP, T, isFood } from '../sim/defs.js';
+import { BUILDINGS, CROPS, DAY, RES, STEP, T } from '../sim/defs.js';
 import { CameraManager } from './CameraManager.js';
 
 const Phaser = globalThis.Phaser;
@@ -25,6 +25,7 @@ export class GameScene extends Phaser.Scene {
     this.nightRect = this.add.rectangle(0, 0, 10, 10, 0x0c1633, 0).setDepth(OVER).setScrollFactor(0).setOrigin(0.5);
     this.fx = this.add.graphics().setDepth(OVER + 2);
     this.groundFx = this.add.graphics().setDepth(GROUND + 5);
+    this.snowG = this.add.graphics().setDepth(OVER + 3).setScrollFactor(0);
     this._input();
     this.scale.on('resize', () => { this.viewDirty = true; });
     this.keys = {};
@@ -38,16 +39,16 @@ export class GameScene extends Phaser.Scene {
     const meta = buildAll((name, pix) => items.push({ name, pix }));
     this.smokeAt = meta.smoke;
     items.sort((a, b) => b.pix.h - a.pix.h);
-    const SZ = 2048;
+    const SZ = 4096;
     const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = SZ;
+    canvas.width = SZ; canvas.height = 2048;
     const ctx = canvas.getContext('2d');
     let x = 0, y = 0, row = 0;
     this.frames = {};
     const place = [];
     for (const it of items) {
       if (x + it.pix.w + 1 > SZ) { x = 0; y += row + 1; row = 0; }
-      if (y + it.pix.h > SZ) throw new Error('Atlas cheio');
+      if (y + it.pix.h > 2048) throw new Error('Atlas cheio');
       ctx.putImageData(new ImageData(it.pix.d, it.pix.w, it.pix.h), x, y);
       place.push([it.name, x, y, it.pix]);
       x += it.pix.w + 1; row = Math.max(row, it.pix.h);
@@ -68,6 +69,7 @@ export class GameScene extends Phaser.Scene {
     this.camMgr.bounds(W.w, W.h);
     this.nodeObj = new Map();
     this.buckets = new Map();
+    this.mtObjs = new Map();
     this.activeCells = new Set();
     this.citizenViews = new Map();
     this.buildingViews = new Map();
@@ -83,12 +85,19 @@ export class GameScene extends Phaser.Scene {
     this.tool = { kind: 'select' };
     this.ghostMark = null;
     this.tileViews = new Map();
+    this.roadViews = new Map();
+    this.animalViews = new Map();
+    this.pastureViews = new Map();
+    this.flames = new Map();
+    this.seasonIdx = sim.season.index();
+    this.jobMarks = null;
     sim.events.length = 0;
     for (const n of sim.nodes.values()) this._addNodeObj(n);
     for (const f of sim.farms) for (let i = 0; i < f.tiles.length; i++) this._syncTile(f, i);
+    for (const r of sim.roads) this._setRoad(r.x, r.y, r.k);
     for (let y = 0; y < W.h; y++) for (let x = 0; x < W.w; x++) {
       const i = W.idx(x, y);
-      if (W.terrain[i] === T.MOUNTAIN) this._addMountain(x, y);
+      if (W.terrain[i] === T.MOUNTAIN && W.road[i] !== 4) this._addMountain(x, y);
       else if (W.terrain[i] === T.WATER && hash(x, y, 77) < 0.16) {
         const [sx, sy] = iso(x + hash(x, y, 1), y + hash(x, y, 2));
         this._toBucket({ kind: 'glint', frame: `glint${Math.floor(hash(x, y, 3) * 3)}`, sx, sy, depth: GROUND + 1, phase: hash(x, y, 4) * 3 });
@@ -132,7 +141,9 @@ export class GameScene extends Phaser.Scene {
     const [sx, sy] = iso(x + 0.5, y + 0.5);
     // Só o interior sobe um pouco: a borda continua apoiada no chão.
     const lift = d > 0 ? Math.floor(hash(x, y, 33) * 11) : 0;
-    this._toBucket({ kind: 'mt', frame: `mt${d}_${Math.floor(hash(x, y, 31) * 4)}`, sx, sy: sy - lift, depth: (x + y + 1) * DEPTH - 1, mountain: true });
+    const mo = { kind: 'mt', frame: `mt${d}_${Math.floor(hash(x, y, 31) * 4)}`, sx, sy: sy - lift, depth: (x + y + 1) * DEPTH - 1, mountain: true };
+    (this.mtObjs = this.mtObjs || new Map()).set(W.idx(x, y), mo);
+    this._toBucket(mo);
   }
   // Cada tile de fazenda tem o solo arado e, quando plantado, a muda.
   _syncTile(f, i) {
@@ -161,6 +172,19 @@ export class GameScene extends Phaser.Scene {
     if (b) { const i = b.indexOf(o); if (i >= 0) b.splice(i, 1); }
     this._hide(o);
   }
+  _setRoad(x, y, k) {
+    const key = this.sim.world.idx(x, y), old = this.roadViews.get(key);
+    if (old) { this._unbucket(old); this.roadViews.delete(key); }
+    if (k === 4) {
+      const m = this.mtObjs?.get(key);
+      if (m) { this._unbucket(m); this.mtObjs.delete(key); }
+    }
+    if (!k) return;
+    const [sx, sy] = iso(x, y);
+    const o = { kind: 'road', frame: `road${k}`, sx, sy, depth: k === 3 ? GROUND + 4 : GROUND + 3 };
+    this.roadViews.set(key, o);
+    this._toBucket(o);
+  }
   _bucketKey(sx, sy) { return (Math.floor(sx / CELL_W) + 512) * 4096 + Math.floor(sy / CELL_H) + 512; }
   _toBucket(o) {
     const k = this._bucketKey(o.sx, o.sy);
@@ -174,6 +198,7 @@ export class GameScene extends Phaser.Scene {
     return im.setVisible(true).clearTint().setAlpha(1).setRotation(0).setScale(1);
   }
   _setF(img, name) {
+    if (!this.frames[name]) { console.warn('Sprite ausente', name); name = 'stone0'; }
     const f = this.frames[name];
     img.setFrame(name);
     img.setOrigin(f.ox, f.oy);
@@ -187,6 +212,33 @@ export class GameScene extends Phaser.Scene {
     if (o.mountain) im.setOrigin(this.frames[o.frame].ox, this.frames[o.frame].oy);
     o.img = im;
     if (o.kind === 'node' && o.node.marked) this._markOn(o);
+    this._seasonLook(o);
+  }
+  _seasonLook(o) {
+    const im = o.img, q = this.seasonIdx;
+    if (!im) return;
+    if (o.tree) {
+      const sp = +o.base[4];
+      if (q === 3) { const fr = `${o.base}_w`; this._setF(im, fr); im.clearTint(); }
+      else {
+        this._setF(im, `${o.base}_0`);
+        if (q === 2 && sp !== 0) im.setTint(sp === 1 ? 0xf2a860 : 0xffd25a);
+        else im.clearTint();
+      }
+      const n = o.node;
+      im.setScale(n.young ? [0.3, 0.6, 1][n.stage || 0] : 1);
+    } else if (o.kind === 'road') {
+      im.setAlpha(q === 3 && (o.frame === 'road1' || o.frame === 'road5') ? 0.4 : 1);
+    } else if (o.mountain || o.kind === 'node') {
+      if (q === 3) im.setTint(0xdfe8f2); else im.clearTint();
+    }
+  }
+  _onSeason(i) {
+    this.seasonIdx = i;
+    for (const c of this.chunks.values()) c.stale = true;
+    this.lastView = '';
+    for (const k of this.activeCells) for (const o of this.buckets.get(k) || []) this._seasonLook(o);
+    this.game.events.emit('news', { kind: 'season', text: ['Chegou a primavera.', 'Chegou o verão.', 'Chegou o outono. Colha o que puder antes da geada.', 'Chegou o inverno. Campos parados e lenha queimando.'][i] });
   }
   _hide(o) {
     if (!o.img) return;
@@ -228,7 +280,7 @@ export class GameScene extends Phaser.Scene {
       const k = `${x},${y}`;
       if (!this._cellInMap(x, y)) continue;
       need.push(k);
-      if (!this.chunks.has(k) && !this.bakeQueue.includes(k)) this.bakeQueue.push(k);
+      if ((!this.chunks.has(k) || this.chunks.get(k).stale) && !this.bakeQueue.includes(k)) this.bakeQueue.push(k);
     }
     const midX = (v.x + v.right) / 2, midY = (v.y + v.bottom) / 2;
     const dist = k => { const [a, b] = k.split(',').map(Number); return Math.hypot((a + 0.5) * CELL_W - midX, (b + 0.5) * CELL_H - midY); };
@@ -249,7 +301,7 @@ export class GameScene extends Phaser.Scene {
   }
   _bake(k) {
     const [cx, cy] = k.split(',').map(Number);
-    let ch = this.chunkPool.pop();
+    let ch = this.chunks.get(k) || this.chunkPool.pop();
     const w = CELL_W + BLEED, h = CELL_H + BLEED;
     if (!ch) {
       const key = `cell${this.cellCount = (this.cellCount || 0) + 1}`;
@@ -257,7 +309,8 @@ export class GameScene extends Phaser.Scene {
       const data = tex.context.createImageData(w, h);
       ch = { tex, data, u32: new Uint32Array(data.data.buffer), img: this.add.image(0, 0, key).setOrigin(0, 0).setDepth(GROUND) };
     }
-    bakeCell(this.sim.world, cx, cy, ch.u32, w, h);
+    bakeCell(this.sim.world, cx, cy, ch.u32, w, h, this.seasonIdx);
+    ch.stale = false;
     ch.tex.context.putImageData(ch.data, 0, 0);
     ch.tex.refresh();
     ch.img.setPosition(cx * CELL_W, cy * CELL_H).setVisible(true);
@@ -282,10 +335,14 @@ export class GameScene extends Phaser.Scene {
     this._syncCitizens(alpha, time);
     this._syncBuildings();
     this._syncPiles();
+    this._syncAnimals(alpha, time);
+    this._syncPastures(time);
+    this._syncFlames(time);
     this._animateStatic(time);
     this._animateFalling(dt);
     this._daylight();
     this._smoke(dt);
+    this._snow(time);
     this._drawFx();
     this.game.events.emit('frame', this);
   }
@@ -294,6 +351,10 @@ export class GameScene extends Phaser.Scene {
     const ev = this.sim.events;
     for (const e of ev) {
       if (e.t === 'news') { this.game.events.emit('news', e); continue; }
+      if (e.t === 'season') { this._onSeason(e.index); continue; }
+      if (e.t === 'road') { this._setRoad(e.x, e.y, e.k); continue; }
+      if (e.t === 'nodeAdded') { const n = this.sim.nodes.get(e.id); if (n) this._addNodeObj(n); continue; }
+      if (e.t === 'nodeGrow') { const o = this.nodeObj.get(e.id); if (o) this._seasonLook(o); continue; }
       if (e.t === 'crop') { const f = this.sim.farming.get(e.farmId); if (f) this._syncTile(f, e.i); }
       else if (e.t === 'farmRemoved') { for (const t of e.tiles) this._clearTile(t); }
       else if (e.t === 'mark') {
@@ -359,7 +420,7 @@ export class GameScene extends Phaser.Scene {
       const d = (x + y + 0.5) * DEPTH;
       if (Math.abs((v.d || 0) - d) > 1) { v.body.setDepth(d); v.cargo.setDepth(d + 0.2); v.d = d; }
       if (c.inv.res) {
-        const cn = `carry_${isFood(c.inv.res) ? 'food' : c.inv.res}`;
+        const cn = `carry_${{ wood: 'wood', firewood: 'wood', stone: 'stone', iron: 'iron' }[c.inv.res] || 'food'}`;
         if (v.cargoF !== cn) { this._setF(v.cargo, cn); v.cargoF = cn; }
         v.cargo.setVisible(true).setPosition(Math.round(px), Math.round(py) - 21);
       } else v.cargo.setVisible(false);
@@ -386,22 +447,32 @@ export class GameScene extends Phaser.Scene {
         v = { base, depth, sx, sy, extra: [], glow: null };
         this.buildingViews.set(b.id, v);
       }
-      const st = this._stage(b), f = `${b.type}_r${b.rot}_s${st}`;
+      const st = this._stage(b);
+      let f = `${b.type}_r${b.rot}_s${st}`;
+      if (!this.frames[f]) f = `${b.w >= 3 ? 'barn' : 'house'}_r${b.rot}_s${st}`;
+      v.base.setTint(this.seasonIdx === 3 && st === 4 ? 0xd8e4f2 : 0xffffff);
+      if (st === 4 && (b.level || 1) > 1) {
+        const fl = `lvl${b.level}`;
+        if (!v.flag) { v.flag = Object.assign(this.add.image(0, 0, 'atlas', fl), { isWorld: true }); v.flagF = null; }
+        if (v.flagF !== fl) { this._setF(v.flag, fl); v.flagF = fl; }
+        const [fx, fy] = iso(b.x + b.w - 0.1, b.y + 0.1);
+        v.flag.setPosition(fx, fy).setDepth(v.depth + 2);
+      }
       if (v.f !== f) { this._setF(v.base, f); v.f = f; }
       this._syncContents(b, v, st);
-      if (b.type === 'house' && st === 4) {
+      if (BUILDINGS[b.type].residents && st === 4) {
         const occupied = b.residents.some(id => this.sim.citizen(id)?.inside);
         v.occupied = occupied;
         if (!v.glow) {
-          v.glow = Object.assign(this.add.image(v.sx, v.sy, 'atlas', `house_r${b.rot}_glow`), { isWorld: true }).setDepth(OVER + 1).setBlendMode(Phaser.BlendModes.ADD);
-          this._setF(v.glow, `house_r${b.rot}_glow`);
+          v.glow = Object.assign(this.add.image(v.sx, v.sy, 'atlas', `${b.type}_r${b.rot}_glow`), { isWorld: true }).setDepth(OVER + 1).setBlendMode(Phaser.BlendModes.ADD);
+          this._setF(v.glow, `${b.type}_r${b.rot}_glow`);
         }
         v.glow.setVisible(occupied).setAlpha(0.85);
       }
     }
     void vis;
     for (const [id, v] of this.buildingViews) if (!seen.has(id)) {
-      v.base.destroy(); v.glow?.destroy(); v.extra.forEach(e => e.destroy());
+      v.base.destroy(); v.glow?.destroy(); v.flag?.destroy(); v.extra.forEach(e => e.destroy());
       this.buildingViews.delete(id);
     }
   }
@@ -412,7 +483,9 @@ export class GameScene extends Phaser.Scene {
       const [sx, sy] = iso(b.x + fx, b.y + fy);
       wanted.push({ sx, sy: sy - dz, name, depth: v.depth + 1 + (fx + fy) });
     };
-    if (b.type === 'depot' && b.done) {
+    if (b.type === 'cemetery' && b.done) {
+      for (let i = 0; i < Math.min(12, b.graves); i++) at(0.5 + (i % 4) * 0.65, 0.55 + Math.floor(i / 4) * 0.7, 'grave');
+    } else if (b.type === 'depot' && b.done) {
       const slots = { wood: [[2.1, 0.7], [2.2, 1.55], [1.3, 2.25]], stone: [[0.75, 2.25], [1.5, 1.45]], iron: [[1.5, 0.75]] };
       const lv = (n, per) => Math.min(3, Math.ceil(n / per));
       const w = b.stock.wood, s = b.stock.stone, ir = b.stock.iron;
@@ -451,7 +524,7 @@ export class GameScene extends Phaser.Scene {
         v = { img: Object.assign(this.add.image(sx, sy + 2, 'atlas', 'pile_wood_1'), { isWorld: true }).setDepth((p.x + p.y + 0.8) * DEPTH) };
         this.pileViews.set(p.id, v);
       }
-      const f = p.res === 'wood' ? `pile_wood_${p.amount >= 9 ? 9 : p.amount >= 6 ? 6 : p.amount >= 3 ? 3 : 1}` : `pile_${isFood(p.res) ? 'food' : p.res}_${Math.min(3, Math.ceil(p.amount / 2))}`;
+      const f = p.res === 'wood' || p.res === 'firewood' ? `pile_wood_${p.amount >= 9 ? 9 : p.amount >= 6 ? 6 : p.amount >= 3 ? 3 : 1}` : `pile_${p.res === 'stone' || p.res === 'iron' ? p.res : 'food'}_${Math.min(3, Math.ceil(p.amount / 2))}`;
       if (v.f !== f) { this._setF(v.img, f); v.f = f; }
     }
     for (const [id, v] of this.pileViews) if (!seen.has(id)) { v.img.destroy(); this.pileViews.delete(id); }
@@ -463,12 +536,76 @@ export class GameScene extends Phaser.Scene {
     for (const k of this.activeCells) for (const o of this.buckets.get(k) || []) {
       if (!o.img) continue;
       if (o.tree) {
+        if (this.seasonIdx === 3) continue;
         const on = Math.sin(time / 900 + o.phase * 1.57 + o.sx * 0.002) > 0.55 ? 1 : 0;
         if (o.sway !== on) { o.sway = on; o.img.setFrame(`${o.base}_${on}`); }
       } else if (o.kind === 'glint') {
         const f = Math.floor(time / 500 + o.phase) % 3;
         if (o.gf !== f) { o.gf = f; o.img.setFrame(`glint${f}`); }
       }
+    }
+  }
+  _syncAnimals(alpha) {
+    const seen = new Set();
+    for (const a of this.sim.animals) {
+      seen.add(a.id);
+      let im = this.animalViews.get(a.id);
+      if (!im) { im = Object.assign(this.add.image(0, 0, 'atlas', 'deer'), { isWorld: true }); this._setF(im, 'deer'); this.animalViews.set(a.id, im); }
+      const x = a.px != null ? a.px + (a.x - a.px) * alpha : a.x, y = a.py != null ? a.py + (a.y - a.py) * alpha : a.y;
+      const [sx, sy] = iso(x, y);
+      im.setPosition(Math.round(sx), Math.round(sy)).setDepth((x + y + 0.5) * DEPTH).setFlipX(a.face === false);
+    }
+    for (const [id, im] of this.animalViews) if (!seen.has(id)) { im.destroy(); this.animalViews.delete(id); }
+  }
+  _syncPastures(time) {
+    const seen = new Set();
+    for (const f of this.sim.farms) {
+      if (f.kind !== 'pasture') continue;
+      seen.add(f.id);
+      let v = this.pastureViews.get(f.id);
+      if (!v) {
+        const g = Object.assign(this.add.graphics(), { isWorld: true }).setDepth(GROUND + 4);
+        g.lineStyle(2, 0x5a4230, 1);
+        const c = [iso(f.x, f.y), iso(f.x + f.w, f.y), iso(f.x + f.w, f.y + f.h), iso(f.x, f.y + f.h)];
+        g.strokePoints(c.map(([x, y]) => ({ x, y: y - 6 })), true);
+        for (const [x, y] of c) g.lineBetween(x, y, x, y - 8);
+        v = { g, sheep: [] };
+        this.pastureViews.set(f.id, v);
+      }
+      while (v.sheep.length < f.herd) { const im = Object.assign(this.add.image(0, 0, 'atlas', 'sheep'), { isWorld: true }); this._setF(im, 'sheep'); im.seed = Math.random() * 100; v.sheep.push(im); }
+      while (v.sheep.length > f.herd) v.sheep.pop().destroy();
+      for (const im of v.sheep) {
+        const u = 0.5 + 0.42 * Math.sin(im.seed + time / 9000 + im.seed * 3), w = 0.5 + 0.42 * Math.cos(im.seed * 2 + time / 11000);
+        const x = f.x + f.w * u, y = f.y + f.h * w, [sx, sy] = iso(x, y);
+        im.setPosition(Math.round(sx), Math.round(sy)).setDepth((x + y + 0.5) * DEPTH).setFlipX(Math.cos(time / 9000 + im.seed) < 0);
+      }
+    }
+    for (const [id, v] of this.pastureViews) if (!seen.has(id)) { v.g.destroy(); v.sheep.forEach(i => i.destroy()); this.pastureViews.delete(id); }
+  }
+  _syncFlames(time) {
+    const seen = new Set();
+    for (const b of this.sim.buildings) {
+      if (!b.burning) continue;
+      seen.add(b.id);
+      let im = this.flames.get(b.id);
+      if (!im) { im = Object.assign(this.add.image(0, 0, 'atlas', 'flame0'), { isWorld: true }); this._setF(im, 'flame0'); this.flames.set(b.id, im); }
+      const [x, y] = iso(b.x + b.w / 2, b.y + b.h / 2);
+      im.setPosition(x, y).setDepth(OVER - 3).setFrame(`flame${Math.floor(time / 130) % 3}`).setScale(1.6);
+    }
+    for (const [id, im] of this.flames) if (!seen.has(id)) { im.destroy(); this.flames.delete(id); }
+  }
+  _snow(time) {
+    const cam = this.cameras.main, g = this.snowG;
+    g.clear();
+    if (this.seasonIdx !== 3 || !this.sim) return;
+    const z = cam.zoom, cx = cam.width / 2, cy = cam.height / 2;
+    g.setPosition(cx * (1 - 1 / z), cy * (1 - 1 / z)).setScale(1 / z);
+    g.fillStyle(0xffffff, 0.8);
+    for (let i = 0; i < 110; i++) {
+      const sp = 22 + (i % 5) * 9;
+      const y = (hash(i, 1, 2) * cam.height + time / 1000 * sp) % cam.height;
+      const x = (hash(i, 2, 2) * cam.width + Math.sin(time / 1500 + i) * 14 + time / 1000 * 8) % cam.width;
+      g.fillRect(Math.round(x), Math.round(y), i % 3 === 0 ? 3 : 2, i % 3 === 0 ? 3 : 2);
     }
   }
   _daylight() {
@@ -490,8 +627,8 @@ export class GameScene extends Phaser.Scene {
     if (this.smokeT <= 0) {
       this.smokeT = 0.55;
       for (const b of this.sim.buildings) {
-        if (b.type !== 'house' || !b.done || !this.buildingViews.get(b.id)?.occupied && !b.residents.length) continue;
-        const a = this.smokeAt[`house_r${b.rot}`];
+        if (!BUILDINGS[b.type].residents || !b.done || !b.residents.length) continue;
+        const a = this.smokeAt[`${b.type}_r${b.rot}`];
         const [sx, sy] = iso(b.x, b.y);
         const im = this._takeImg();
         this._setF(im, 'smoke0');
@@ -560,6 +697,13 @@ export class GameScene extends Phaser.Scene {
       const col = t.value ? 0xe2733a : 0xbfc8d0;
       this._diamond(f, x0, y0, x1 - x0 + 1, y1 - y0 + 1, col, 1, 0.16);
     }
+    if (t.kind === 'road' && t.a && t.c) {
+      for (const [x, y] of this.sim.infra.line(t.a.x, t.a.y, t.c.x, t.c.y)) {
+        const ok = this.sim.infra.fits(t.k, x, y);
+        this._diamond(f, x, y, 1, 1, ok ? 0x9fd86a : 0xe2553a, 1, 0.22);
+      }
+    }
+    if (this.sim.roadJobs.length) for (const j of this.sim.roadJobs) this._diamond(g, j.x, j.y, 1, 1, 0xd9b872, 0.7, 0.12);
     if (t.kind === 'field' && t.rect) {
       const { x0, y0, x1, y1 } = t.rect;
       t.check = this.sim.farming.validate(x0, y0, x1, y1);
@@ -603,7 +747,7 @@ export class GameScene extends Phaser.Scene {
   }
   _input() {
     const I = this.input;
-    const isRect = () => this.tool.kind === 'mark' || this.tool.kind === 'field';
+    const isRect = () => this.tool.kind === 'mark' || this.tool.kind === 'field' || this.tool.kind === 'road';
     const drag = { on: false, moved: 0, lastX: 0, lastY: 0, pinch: 0, pan: false };
     I.on('wheel', (p, o, dx, dy) => this.camMgr.zoomAt(dy > 0 ? 0.88 : 1.14, p.x, p.y));
     I.on('pointerdown', p => {
@@ -617,7 +761,7 @@ export class GameScene extends Phaser.Scene {
       drag.on = true; drag.moved = 0; drag.lastX = p.x; drag.lastY = p.y;
       drag.pan = !isRect() || p.rightButtonDown() || p.middleButtonDown();
       drag.touch = p.wasTouch;
-      if (isRect() && !drag.pan) { const t = this.tileAt(p.x, p.y); this.tool.a = t; this.tool.rect = { x0: t.x, y0: t.y, x1: t.x, y1: t.y }; }
+      if (isRect() && !drag.pan) { const t = this.tileAt(p.x, p.y); this.tool.a = t; this.tool.c = t; this.tool.rect = { x0: t.x, y0: t.y, x1: t.x, y1: t.y }; }
     });
     I.on('pointermove', p => {
       const t = this.tool;
@@ -642,6 +786,7 @@ export class GameScene extends Phaser.Scene {
       if (drag.pan) { if (drag.moved > 5) this.camMgr.panBy(dx, dy); }
       else if (isRect() && t.a) {
         const c = this.tileAt(p.x, p.y);
+        t.c = c;
         t.rect = { x0: Math.min(t.a.x, c.x), y0: Math.min(t.a.y, c.y), x1: Math.max(t.a.x, c.x), y1: Math.max(t.a.y, c.y) };
       }
     });
@@ -653,12 +798,20 @@ export class GameScene extends Phaser.Scene {
       if (p.rightButtonReleased?.() && !isRect()) { if (drag.moved < 6) this.setTool({ kind: 'select' }); return; }
       if (t.kind === 'mark' && t.rect) {
         const r = t.rect;
-        const n = this.sim.mark(r.x0, r.y0, r.x1, r.y1, t.types, t.value);
+        let n = this.sim.mark(r.x0, r.y0, r.x1, r.y1, t.types, t.value);
+        if (!t.value) n += this.sim.infra.removeArea(r.x0, r.y0, r.x1, r.y1);
         this.game.events.emit('marked', { n, value: t.value, types: t.types });
         t.rect = null; t.a = null;
         return;
       }
-      if (t.kind === 'field' && t.rect) {
+      if (t.kind === 'road' && t.a && t.c) {
+      for (const [x, y] of this.sim.infra.line(t.a.x, t.a.y, t.c.x, t.c.y)) {
+        const ok = this.sim.infra.fits(t.k, x, y);
+        this._diamond(f, x, y, 1, 1, ok ? 0x9fd86a : 0xe2553a, 1, 0.22);
+      }
+    }
+    if (this.sim.roadJobs.length) for (const j of this.sim.roadJobs) this._diamond(g, j.x, j.y, 1, 1, 0xd9b872, 0.7, 0.12);
+    if (t.kind === 'field' && t.rect) {
         const r = t.rect;
         const res = this.sim.farming.place(r.x0, r.y0, r.x1, r.y1, 'potato');
         t.rect = null; t.a = null;
