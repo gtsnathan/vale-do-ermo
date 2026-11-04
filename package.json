@@ -1,16 +1,1 @@
-{
-  "name": "vale-do-ermo",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "directories": {
-    "test": "test"
-  },
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "module"
-}
+{ "name": "fazenda-dos-sonhos", "private": true, "scripts": { "publicar": "wrangler deploy" }, "devDependencies": { "wrangler": "^4" } }

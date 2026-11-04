@@ -1,0 +1,3 @@
+CREATE TABLE rank_players (pid TEXT PRIMARY KEY, name TEXT NOT NULL, last_total INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+CREATE TABLE rank_scores (week INTEGER NOT NULL, pid TEXT NOT NULL, score INTEGER NOT NULL DEFAULT 0, lvl INTEGER NOT NULL DEFAULT 1, updated_at INTEGER NOT NULL, acked INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (week, pid));
+CREATE INDEX rank_week ON rank_scores(week, score DESC);

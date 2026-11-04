@@ -1,0 +1,21 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@800;900&family=Rubik:wght@500;700&display=swap"><link rel="stylesheet" href="/assets/site.css"><title>Fazenda dos Sonhos</title><meta name="description" content="Jogo de fazenda em uma ilha flutuante. Plante, crie animais, viaje com o Nimbo e dispute o ranking semanal. Grátis no navegador."></head><body>
+<header class="top"><div class="wrap"><a class="logo" href="/">Fazenda dos Sonhos</a><nav><a id="acct" class="btn plain" href="/entrar/">Entrar</a><a class="btn green" href="/jogar/">Jogar</a></nav></div></header>
+<main>
+<div class="hero"><div class="heroimg" role="img" aria-label="Ilha flutuante com casa, celeiro, plantações e lago"></div><div class="wrap"><div><h1>Sua fazenda no céu</h1><p>Plante, crie animais e transforme uma pequena ilha em uma grande fazenda entre as nuvens.</p></div><div class="cta"><a class="btn green big" href="/jogar/">Jogar grátis</a><p class="note">Abre no navegador do celular ou do computador. Não precisa instalar.</p></div></div></div>
+<section class="nimbo"><div class="wrap split"><div><h2>Conheça o Nimbo</h2><p class="lead">Uma nuvem de estimação que acompanha você, cresce com seus cuidados e viaja pelo céu enquanto o jogo está fechado.</p><ul class="list"><li><b>Mande em viagens</b><span>Ele volta com moedas, adubo e cartões-postais de lugares impossíveis.</span></li><li><b>Realize desejos</b><span>Todo dia ele pede uma colheita diferente.</span></li><li><b>Dê um nome</b><span>A nuvem é sua, e ela muda conforme cresce.</span></li></ul></div><img class="shot" src="/assets/nimbo.png" alt="Tela do Nimbo com viagens e cartões-postais" loading="lazy"></div></section>
+<section class="game"><div class="wrap"><h2>Sempre tem algo para fazer</h2><p class="lead">Colheitas rápidas, produção encadeada e pequenos prazeres enquanto a próxima safra fica pronta.</p><div class="feat">
+<figure><img class="shot" src="/assets/fazenda.png" alt="Ilha com casa, celeiro, plantações e animais" loading="lazy"><figcaption><b>Cresça sua ilha</b><span>16 culturas, 7 tipos de animais, fábricas, funcionários e 14 tamanhos de terreno.</span></figcaption></figure>
+<figure><img class="shot" src="/assets/diversao.png" alt="Pesca, roleta e tarefas do dia" loading="lazy"><figcaption><b>Faça uma pausa</b><span>Pesque no lago, corte a grama, gire a roleta e cumpra as tarefas do dia.</span></figcaption></figure>
+<figure><img class="shot" src="/assets/ranking.png" alt="Ranking semanal de jogadores" loading="lazy"><figcaption><b>Dispute a semana</b><span>Suba no ranking semanal e ganhe diamantes se terminar entre os dez primeiros. Imagem ilustrativa.</span></figcaption></figure>
+</div></div></section>
+<section class="faq"><div class="wrap"><h2>Perguntas frequentes</h2>
+<details><summary>O jogo é grátis?</summary><p>Sim. Você pode jogar sem pagar. Quem quiser pode comprar diamantes, que aceleram a fazenda e abrem vantagens opcionais.</p></details>
+<details><summary>Preciso criar conta?</summary><p>Não para começar. Com uma conta, sua fazenda fica salva no servidor e você continua em outro aparelho.</p></details>
+<details><summary>Como pago os diamantes?</summary><p>O pagamento é feito na página do Mercado Pago. O jogo não vê nem guarda os dados do seu cartão.</p></details>
+<details><summary>Esqueci minha senha. E agora?</summary><p>Use o código de recuperação que aparece quando você cria a conta. Guarde esse código em um lugar seguro.</p></details>
+</div></section>
+<section class="final"><div class="wrap"><h2>Sua ilha está esperando</h2><p>A primeira colheita fica pronta em menos de um minuto.</p><a class="btn green big" href="/jogar/">Começar a jogar</a></div></section>
+</main>
+<footer><div class="wrap"><span>Fazenda dos Sonhos</span><span><a href="/termos/">Termos de uso</a> · <a href="/privacidade/">Privacidade</a></span></div></footer>
+<script>fetch('/api/auth/me').then(r=>r.json()).then(j=>{if(j.user){const a=document.getElementById('acct');a.textContent='Minha fazenda';a.href='/jogar/'}}).catch(()=>{})</script>
+</body></html>
